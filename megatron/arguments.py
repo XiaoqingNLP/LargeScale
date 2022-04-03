@@ -53,6 +53,7 @@ def parse_args(extra_args_provider=None, defaults={},
     parser = _add_zero_args(parser)
     parser = _add_memoryopt_args(parser)
     parser = _add_activation_checkpoint_args(parser)
+    parser = _add_glm_args(parser)
 
     # Custom arguments.
     if extra_args_provider is not None:
@@ -1064,4 +1065,15 @@ def _add_activation_checkpoint_args(parser):
                        help='does a synchronize at the beginning and end of each checkpointed layer.')
     group.add_argument('--profile-backward', action='store_true',
                        help='Enables backward pass profiling for checkpointed layers.')
+    return parser
+
+def _add_glm_args(parser):
+    group = parser.add_argument_group("GLM", "GLM configurations")
+    group.add_argument('--glm', action='store_true', help="whether use the BlockLM pre-training")
+    group.add_argument("--gpt-prob", type=float, default=0.0)
+    # group.add_argument("--short-seq-prob", type=float, default=0.02)
+    group.add_argument("--single-span-prob", type=float, default=0.02)
+    # group.add_argument("--mask-ratio", type=float, default=0.15)
+    group.add_argument("--average-block-length", type=int, default=3)
+    group.add_argument("--min-gmask-ratio", type=float, default=0.2)
     return parser

@@ -56,6 +56,9 @@ def build_tokenizer(args):
         if args.rank == 0:
             print(" vocab file is un-used. loading tokenizer from pre-trained model")
         tokenizer = _AutoTokenizer(args.tokenizer_name_or_path)
+    elif args.tokenizer_type == "IceTokenizer":
+        from .ice_tokenizer import _IceTokenizer
+        tokenizer = _IceTokenizer()
     else:
         raise NotImplementedError('{} tokenizer is not '
                                   'implemented.'.format(args.tokenizer_type))

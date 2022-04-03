@@ -118,12 +118,14 @@ class Embedding(MegatronModule):
                  vocab_size,
                  embedding_dropout_prob,
                  init_method,
-                 num_tokentypes=0):
+                 num_tokentypes=0,
+                 positional_encoding_2d=False):
         super(Embedding, self).__init__()
 
         self.hidden_size = hidden_size
         self.init_method = init_method
         self.num_tokentypes = num_tokentypes
+        self.positional_encoding_2d = positional_encoding_2d
 
         args = get_args()
 
@@ -143,6 +145,16 @@ class Embedding(MegatronModule):
             self._position_embeddings_key = 'position_embeddings'
             # Initialize the position embeddings.
             self.init_method(self.position_embeddings.weight)
+
+            # Block Position Embedding (serial)
+            self._block_position_embeddings_key = "block_position_embeddings"
+            if self.positional_encoding_2d:
+                self.block_position_embeddings = torch.nn.Embedding(
+                    max_position_embeddings, self.hidden_size)
+                # Initialize the block position embeddings
+                self.init_method(self.block_position_embeddings.weight)
+            else:
+                self.block_position_embeddings = None
         else:
             self.position_embeddings = None
 
@@ -186,7 +198,16 @@ class Embedding(MegatronModule):
 
         if self.position_embedding_type == PositionEmbeddingType.absolute:
             assert self.position_embeddings is not None
-            embeddings = embeddings + self.position_embeddings(position_ids)
+            if self.positional_encoding_2d:
+                position_ids, block_position_ids = position_ids[:,
+                                                   0], position_ids[:, 1]
+                position_embeddings = self.position_embeddings(position_ids)
+                block_position_embeddings = self.block_position_embeddings(
+                    block_position_ids)
+                position_embeddings = position_embeddings + block_position_embeddings
+            else:
+                position_embeddings = self.position_embeddings(position_ids)
+            embeddings = embeddings + position_embeddings
         else:
             assert self.position_embeddings is None
 
@@ -212,6 +233,9 @@ class Embedding(MegatronModule):
             state_dict_[self._position_embeddings_key] \
                 = self.position_embeddings.state_dict(
                     destination, prefix, keep_vars)
+            state_dict_[self._block_position_embeddings_key] \
+                = self.block_position_embeddings.state_dict(
+                destination, prefix, keep_vars)
         if self.num_tokentypes > 0:
             state_dict_[self._tokentype_embeddings_key] \
                 = self.tokentype_embeddings.state_dict(
@@ -246,6 +270,9 @@ class Embedding(MegatronModule):
                         state_dict_[key.split('position_embeddings.')[1]] \
                             = state_dict[key]
             self.position_embeddings.load_state_dict(state_dict_, strict=strict)
+
+            state_dict_ = state_dict[self._block_position_embeddings_key]
+            self.block_position_embeddings.load_state_dict(state_dict_, strict=strict)
 
         # Tokentype embedding.
         if self.num_tokentypes > 0:
@@ -339,7 +366,8 @@ class TransformerLanguageModel(MegatronModule):
                                        args.padded_vocab_size,
                                        args.hidden_dropout,
                                        self.init_method,
-                                       self.num_tokentypes)
+                                       self.num_tokentypes,
+                                       args.glm)
             self._embedding_key = 'embedding'
 
         # Transformer.

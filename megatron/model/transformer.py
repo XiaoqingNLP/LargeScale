@@ -643,6 +643,8 @@ class ParallelTransformerLayerPipe(ParallelTransformerLayer):
             # No attention mask forwarded, search for args.attn_mask
             if not hasattr(self, '_args'):
                 self._args = get_args()
+                if self._args.glm:
+                    assert False, "GLM doesn't have constant attention mask"
             hidden_states, attention_mask = inputs, self._args.attn_mask
             return super().forward(hidden_states, attention_mask, **kwargs)
         elif len(inputs) == 2:

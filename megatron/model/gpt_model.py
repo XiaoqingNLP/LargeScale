@@ -229,6 +229,7 @@ class GPTModelPipe(PipelineModule,MegatronModule):
                                         args.hidden_dropout,
                                         init_method=init_method,
                                         num_tokentypes=num_tokentypes,
+                                        positional_encoding_2d=args.glm,
                                         tied_weight_attr='word_embeddings_weight'))
 
         if args.fp32_residual_connection:
@@ -283,6 +284,7 @@ class GPTModelPipe(PipelineModule,MegatronModule):
                           args.hidden_dropout,
                           init_method=init_method,
                           num_tokentypes=num_tokentypes,
+                          positional_encoding_2d=args.glm,
                           forward_fn=_logits_helper,
                           tied_weight_attr='word_embeddings_weight')
         )
