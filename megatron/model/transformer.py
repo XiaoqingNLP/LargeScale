@@ -205,6 +205,9 @@ class ParallelAttention(MegatronModule):
         if self.position_embedding_type == PositionEmbeddingType.rotary:
             self.rotary_emb = RotaryEmbedding(self.hidden_size_per_attention_head, precision=args.params_dtype)
 
+        self.apply_pb_relax = args.apply_pb_relax
+        self.pb_relax_alpha = args.pb_relax_alpha
+
     def forward(self, hidden_states, attention_mask, layer_past=None,
                 get_key_value=False, encoder_output=None, alibi=None):
         # hidden_states: [sq, b, h]
@@ -306,9 +309,9 @@ class ParallelAttention(MegatronModule):
         if alibi is None:
             matmul_result = torch.baddbmm(
                 matmul_result,
-                query_layer.transpose(0, 1),   # [b * np, sq, hn]
-                key_layer.transpose(0, 1).transpose(1, 2),  # [b * np, hn, sk]
-                beta=0.0, alpha=(1.0/self.norm_factor))
+                query_layer.transpose(0, 1) / self.norm_factor,   # [b * np, sq, hn]
+                key_layer.transpose(0, 1).transpose(1, 2) / (self.pb_relax_alpha if self.apply_pb_relax else 1.0),  # [b * np, hn, sk]
+                beta=0.0, alpha=1.0)
         else:
             if not hasattr(self, "logged_alibi"):
                 logger.debug("Using Alibi.")
@@ -321,12 +324,17 @@ class ParallelAttention(MegatronModule):
 
             matmul_result = torch.baddbmm(
                 matmul_result,
-                query_layer.transpose(0, 1),  # [b * np, sq, hn]
-                key_layer.transpose(0, 1).transpose(1, 2),  # [b * np, hn, sk]
-                beta=beta, alpha=(1.0 / self.norm_factor))
+                query_layer.transpose(0, 1) / self.norm_factor,   # [b * np, sq, hn]
+                key_layer.transpose(0, 1).transpose(1, 2) / (self.pb_relax_alpha if self.apply_pb_relax else 1.0),  # [b * np, hn, sk]
+                beta=beta, alpha=1.0)
 
         # change view to [b, np, sq, sk]
         attention_scores = matmul_result.view(*output_size)
+
+        if self.apply_pb_relax:
+            b, np = attention_scores.size(0), attention_scores.size(1)
+            attention_scores = (attention_scores - attention_scores.view(b, np, -1).abs()
+                                .max(dim=-1).values.view(b, np, 1, 1)) * self.pb_relax_alpha
         # ==================================================
         # Update attention mask for inference. [b, np, sq, sk]
         # ==================================================

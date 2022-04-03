@@ -1081,4 +1081,15 @@ def _add_glm_args(parser):
         action="store_true",
         help="Use Sandwich-LN",
     )
+    group.add_argument(
+        "--apply-pb-relax",
+        action="store_true",
+        help="Use pb-relax",
+    )
+    group.add_argument(
+        "--pb-relax-alpha",
+        type=int,
+        default=32,
+        help="Alpha value in pb-relax",
+    )
     return parser
