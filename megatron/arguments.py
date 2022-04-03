@@ -1076,4 +1076,9 @@ def _add_glm_args(parser):
     # group.add_argument("--mask-ratio", type=float, default=0.15)
     group.add_argument("--average-block-length", type=int, default=3)
     group.add_argument("--min-gmask-ratio", type=float, default=0.2)
+    group.add_argument(
+        "--sandwich-ln",
+        action="store_true",
+        help="Use Sandwich-LN",
+    )
     return parser

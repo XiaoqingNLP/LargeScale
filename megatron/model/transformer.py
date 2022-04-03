@@ -496,6 +496,13 @@ class ParallelTransformerLayer(MegatronModule):
         else:
             self.alibi = None
 
+        self.apply_scale_normalization = args.sandwich_ln
+        if self.apply_scale_normalization:
+            self.third_layernorm = LayerNorm(args.hidden_size,
+                                             eps=args.layernorm_epsilon)
+            self.fourth_layernorm = LayerNorm(args.hidden_size,
+                                              eps=args.layernorm_epsilon)
+
     def forward(self, hidden_states, attention_mask,
                 encoder_output=None, enc_dec_attn_mask=None,
                 layer_past=None, get_key_value=False):
@@ -513,6 +520,9 @@ class ParallelTransformerLayer(MegatronModule):
 
         if get_key_value:
             attention_output, presents = attention_output
+
+        if self.apply_scale_normalization:
+            attention_output = self.third_layernorm(attention_output)
 
         # Residual connection.
         if self.apply_residual_connection_post_layernorm:
@@ -567,6 +577,9 @@ class ParallelTransformerLayer(MegatronModule):
 
         # MLP.
         mlp_output, mlp_bias = self.mlp(layernorm_output)
+
+        if self.apply_scale_normalization:
+            mlp_output = self.fourth_layernorm(mlp_output)
 
         # Second residual connection.
         if self.apply_residual_connection_post_layernorm:
