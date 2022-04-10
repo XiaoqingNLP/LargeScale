@@ -91,7 +91,7 @@ def set_global_variables(extra_args_provider=None, args_defaults={},
                        defaults=args_defaults,
                        ignore_unknown_args=ignore_unknown_args)
     _build_num_microbatches_calculator(args)
-    if args.vocab_file or args.tokenizer_name_or_path:
+    if args.vocab_file or args.tokenizer_name_or_path or args.tokenizer_type == "IceTokenizer":
         _ = _build_tokenizer(args)
     _set_tensorboard_writer(args)
     _set_codecarbon_tracker(args)
@@ -143,16 +143,16 @@ def _set_tensorboard_writer(args):
     if hasattr(args, 'tensorboard_dir') and \
        args.tensorboard_dir and args.rank == (args.world_size - 1):
         try:
-            from torch.utils.tensorboard import SummaryWriter
+            from tensorboardX import SummaryWriter
             print('> setting tensorboard ...')
             _GLOBAL_TENSORBOARD_WRITER = SummaryWriter(
                 log_dir=args.tensorboard_dir,
                 max_queue=args.tensorboard_queue_size)
             # this is supposed to make the data load in TB faster
-            if version.parse(torch.__version__) >= version.parse("1.9"):
-                _GLOBAL_TENSORBOARD_WRITER.add_scalar = functools.partial(
-                    _GLOBAL_TENSORBOARD_WRITER.add_scalar, new_style=True
-                )
+            # if version.parse(torch.__version__) >= version.parse("1.9"):
+            #     _GLOBAL_TENSORBOARD_WRITER.add_scalar = functools.partial(
+            #         _GLOBAL_TENSORBOARD_WRITER.add_scalar, new_style=True
+            #     )
         except ModuleNotFoundError:
             print('WARNING: TensorBoard writing requested but is not '
                   'available (are you using PyTorch 1.1.0 or later?), '

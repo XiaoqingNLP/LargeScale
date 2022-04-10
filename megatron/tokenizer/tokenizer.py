@@ -29,7 +29,8 @@ def build_tokenizer(args):
               flush=True)
 
     # Select and instantiate the tokenizer.
-    assert args.vocab_file is not None or args.tokenizer_type == "PretrainedFromHF"
+    assert args.vocab_file is not None or args.tokenizer_type == "PretrainedFromHF" \
+        or args.tokenizer_type == "IceTokenizer"
     if args.tokenizer_type == 'BertWordPieceLowerCase':
         tokenizer = _BertWordPieceTokenizer(vocab_file=args.vocab_file,
                                             lower_case=True,
