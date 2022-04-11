@@ -174,6 +174,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
             splits_string=args.split,
             train_valid_test_num_samples=train_val_test_num_samples,
             seq_length=args.seq_length,
+            length_per_sample=args.length_per_sample,
             args=args)
     # Option 2 of data loading using --(train|valid|test)-weighted-split-paths
     elif args.train_weighted_split_paths:

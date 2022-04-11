@@ -16,7 +16,8 @@ def get_input(tokens, targets, loss_masks, position_ids, division):
 
 
 def build_train_valid_test_datasets(
-    data_prefix, splits_string, train_valid_test_num_samples, seq_length, args
+    data_prefix, splits_string, train_valid_test_num_samples, seq_length,
+    length_per_sample, args
 ):
     tokenizer = get_tokenizer()
 
@@ -40,7 +41,7 @@ def build_train_valid_test_datasets(
     dataset = BinaryDataset(
         f"{data_prefix[0]}.bin",
         lambda *args: get_input(*collator.get_input_data(*args)),
-        length_per_sample=seq_length,
+        length_per_sample=length_per_sample,
     )
     train_dataset, valid_dataset, test_dataset = split_ds(
         dataset, [float(s) for s in splits_string.split(",")], block_size=10000

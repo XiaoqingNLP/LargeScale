@@ -132,7 +132,9 @@ class Embedding(MegatronModule):
         # Word embeddings (parallel).
         self.word_embeddings = mpu.VocabParallelEmbedding(
             vocab_size, self.hidden_size,
-            init_method=self.init_method)
+            init_method=init_method_normal(args.embedding_init_std)
+            if args.embedding_init_std is not None else init_method
+        )
         self._word_embeddings_key = 'word_embeddings'
 
         # Position embedding (serial).
@@ -269,9 +271,19 @@ class Embedding(MegatronModule):
                     if 'position_embeddings' in key:
                         state_dict_[key.split('position_embeddings.')[1]] \
                             = state_dict[key]
+                assert state_dict_
             self.position_embeddings.load_state_dict(state_dict_, strict=strict)
 
-            state_dict_ = state_dict[self._block_position_embeddings_key]
+            if self._block_position_embeddings_key in state_dict:
+                state_dict_ = state_dict[self._block_position_embeddings_key]
+            else:
+                # for backward compatibility.
+                state_dict_ = {}
+                for key in state_dict.keys():
+                    if 'block_position_embeddings' in key:
+                        state_dict_[key.split('block_position_embeddings.')[1]] \
+                            = state_dict[key]
+                assert state_dict_
             self.block_position_embeddings.load_state_dict(state_dict_, strict=strict)
 
         # Tokentype embedding.

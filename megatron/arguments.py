@@ -587,6 +587,9 @@ def _add_initialization_args(parser):
                        'distribution used for weight initialization.')
     group.add_argument('--init-method-xavier-uniform', action='store_true',
                        help='Enable Xavier uniform parameter initialization')
+    group.add_argument('--embedding-init-std', type=float, default=None,
+                       help='Standard deviation of the zero mean normal '
+                            'distribution used for embedding initialization.')
 
     return parser
 
@@ -1092,4 +1095,5 @@ def _add_glm_args(parser):
         default=32,
         help="Alpha value in pb-relax",
     )
+    group.add_argument("--length-per-sample", type=int, default=None)
     return parser
