@@ -13,6 +13,7 @@ class GLMPreprocessor:
             sop_id,
             eop_id,
             max_seq_length,
+            aggregated_samples_per_sequence,
             gpt_prob,
             short_seq_prob,
             single_span_prob,
@@ -28,6 +29,7 @@ class GLMPreprocessor:
         self.sop_id = sop_id
         self.eop_id = eop_id
         self.max_seq_length = max_seq_length
+        self.aggregated_samples_per_sequence = aggregated_samples_per_sequence
         self.gpt_prob = gpt_prob
         self.bert_prob = 1 - gpt_prob
         self.short_seq_prob = short_seq_prob

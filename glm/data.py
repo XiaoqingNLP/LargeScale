@@ -17,9 +17,11 @@ def get_input(tokens, targets, loss_masks, position_ids, division):
 
 def build_train_valid_test_datasets(
     data_prefix, splits_string, train_valid_test_num_samples, seq_length,
-    length_per_sample, args
+    length_per_sample, aggregated_samples_per_sequence, args
 ):
     tokenizer = get_tokenizer()
+
+    assert args.seq_len == aggregated_samples_per_sequence * args.max_position_embeddings
 
     collator = GLMPreprocessor(
         eod_id=tokenizer.get_special_token("eod"),
@@ -28,6 +30,7 @@ def build_train_valid_test_datasets(
         sop_id=tokenizer.get_special_token("sop"),
         eop_id=tokenizer.get_special_token("eop"),
         max_seq_length=seq_length,
+        aggregated_samples_per_sequence=aggregated_samples_per_sequence,
         gpt_prob=args.gpt_prob,
         short_seq_prob=args.short_seq_prob,
         single_span_prob=args.single_span_prob,

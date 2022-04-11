@@ -1096,4 +1096,5 @@ def _add_glm_args(parser):
         help="Alpha value in pb-relax",
     )
     group.add_argument("--length-per-sample", type=int, default=None)
+    group.add_argument("--aggregated-samples-per-sequence", type=int, default=1)
     return parser
