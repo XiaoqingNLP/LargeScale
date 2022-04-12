@@ -21,7 +21,7 @@ def build_train_valid_test_datasets(
 ):
     tokenizer = get_tokenizer()
 
-    assert args.seq_len == aggregated_samples_per_sequence * args.max_position_embeddings
+    assert args.seq_length == aggregated_samples_per_sequence * args.max_position_embeddings
 
     collator = GLMPreprocessor(
         eod_id=tokenizer.get_special_token("eod"),
