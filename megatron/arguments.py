@@ -473,6 +473,8 @@ def _add_regularization_args(parser):
                        'numerical stability')
     group.add_argument('--sgd-momentum', type=float, default=0.9,
                        help='Momentum factor for sgd')
+    group.add_argument('--shrink-embedding-gradient-alpha', type=float, default=1.0,
+                       help='Shrink embedding gradient for alpha')
 
     return parser
 

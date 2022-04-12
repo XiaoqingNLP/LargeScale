@@ -176,6 +176,9 @@ class Embedding(MegatronModule):
         # Embeddings dropout
         self.embedding_dropout = torch.nn.Dropout(embedding_dropout_prob)
 
+        # Shrink embedding gradient
+        self.shrink_embedding_gradient_alpha = args.shrink_embedding_gradient_alpha
+
     def add_tokentype_embeddings(self, num_tokentypes):
         """Add token-type embedding. This function is provided so we can add
         token-type embeddings in case the pretrained model does not have it.
@@ -196,7 +199,11 @@ class Embedding(MegatronModule):
     def forward(self, input_ids, position_ids, tokentype_ids=None):
         # Embeddings.
         words_embeddings = self.word_embeddings(input_ids)
-        embeddings = words_embeddings
+        embeddings = words_embeddings if self.shrink_embedding_gradient_alpha == 1.0 \
+            else (
+                words_embeddings * self.shrink_embedding_gradient_alpha +
+                words_embeddings.detach() * (1 - self.shrink_embedding_gradient_alpha)
+            )
 
         if self.position_embedding_type == PositionEmbeddingType.absolute:
             assert self.position_embeddings is not None
