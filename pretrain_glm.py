@@ -92,12 +92,6 @@ def process_data(data):
 
     attention_mask = build_mask_matrix(attention_mask, tokens.size(0),
                                        tokens.size(1))
-
-    if args.fp16:
-        attention_mask = attention_mask.half()
-    elif args.bf16:
-        attention_mask = attention_mask.bfloat16()
-
     attention_mask = attention_mask.to(torch.bool)
 
     return tokens, labels, loss_mask, attention_mask, position_ids
