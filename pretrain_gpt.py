@@ -200,14 +200,37 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
     # Option 1 of data loading using --data-path
 
     if args.data_path:
-        train_ds, valid_ds, test_ds = build_train_valid_test_datasets(
-            data_prefix=args.data_path,
-            data_impl=args.data_impl,
-            splits_string=args.split,
-            train_valid_test_num_samples=train_val_test_num_samples,
-            seq_length=args.seq_length,
-            seed=args.seed,
-            skip_warmup=(not args.mmap_warmup))
+        if args.tokenizer_type != "IceTokenizer":
+            train_ds, valid_ds, test_ds = build_train_valid_test_datasets(
+               data_prefix=args.data_path,
+               data_impl=args.data_impl,
+               splits_string=args.split,
+               train_valid_test_num_samples=train_val_test_num_samples,
+               seq_length=args.seq_length,
+               seed=args.seed,
+               skip_warmup=(not args.mmap_warmup))
+        else:
+            from glm.datasets import BinaryDataset, RandomMappingDataset, split_ds
+
+            dataset = BinaryDataset(
+                f"{args.data_path[0]}.bin",
+                lambda token, index: {'text': torch.tensor(token, dtype=torch.long)},
+                length_per_sample=args.length_per_sample,
+            )
+            train_dataset, valid_dataset, test_dataset = split_ds(
+                dataset, [float(s) for s in args.split.split(",")],
+                block_size=10000
+            )
+            print(
+                f"    train: {len(train_dataset)}, valid: {len(valid_dataset)}, test: {len(test_dataset)}"
+            )
+
+            scale = max(200,
+                        1 + train_val_test_num_samples[0] // len(train_dataset))
+            train_ds = RandomMappingDataset(train_dataset, scale=scale)
+            valid_ds = RandomMappingDataset(valid_dataset, scale=200)
+            test_ds = RandomMappingDataset(test_dataset, scale=200)
+
     # Option 2 of data loading using --(train|valid|test)-weighted-split-paths
     elif args.train_weighted_split_paths:
         assigned_train_valid_test = []

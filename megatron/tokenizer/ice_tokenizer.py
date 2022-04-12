@@ -41,12 +41,13 @@ class _IceTokenizer(AbstractTokenizer):
         return idx in self.sentence_end_decoder
 
     def IdToToken(self, idx):
-        if idx in self.special_tokens_decoder:
-            return self.special_tokens_decoder[idx]
-        elif idx in self.sentence_end_decoder:
-            return self.sentence_end_decoder[idx]
+        if idx == 0:
+            return '[pad]'
+        elif idx in self.special_tokens_decoder:
+            return f"[{self.special_tokens_decoder[idx]}]"
         else:
-            assert False, "Unsupported token"
+            from icetk import icetk
+            return icetk.decode([idx])
 
     @property
     def vocab_size(self):
@@ -72,4 +73,4 @@ class _IceTokenizer(AbstractTokenizer):
 
     @property
     def eod(self):
-        return self.eod_id
+        return self.get_special_token('eod')

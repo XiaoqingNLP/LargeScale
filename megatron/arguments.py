@@ -908,7 +908,8 @@ def _add_data_args(parser):
                        choices=['BertWordPieceLowerCase',
                                 'BertWordPieceCase',
                                 'GPT2BPETokenizer',
-                                'PretrainedFromHF'],
+                                'PretrainedFromHF',
+                                'IceTokenizer'],
                        help='What type of tokenizer to use.')
     group.add_argument("--tokenizer-name-or-path", type=str, default=None,
                        help="Name or path of the huggingface tokenizer.")
