@@ -143,16 +143,16 @@ def _set_tensorboard_writer(args):
     if hasattr(args, 'tensorboard_dir') and \
        args.tensorboard_dir and args.rank == (args.world_size - 1):
         try:
-            from tensorboardX import SummaryWriter
+            from torch.utils.tensorboard import SummaryWriter
             print('> setting tensorboard ...')
             _GLOBAL_TENSORBOARD_WRITER = SummaryWriter(
                 log_dir=args.tensorboard_dir,
                 max_queue=args.tensorboard_queue_size)
             # this is supposed to make the data load in TB faster
-            # if version.parse(torch.__version__) >= version.parse("1.9"):
-            #     _GLOBAL_TENSORBOARD_WRITER.add_scalar = functools.partial(
-            #         _GLOBAL_TENSORBOARD_WRITER.add_scalar, new_style=True
-            #     )
+            if version.parse(torch.__version__) >= version.parse("1.9"):
+                _GLOBAL_TENSORBOARD_WRITER.add_scalar = functools.partial(
+                    _GLOBAL_TENSORBOARD_WRITER.add_scalar, new_style=True
+                )
         except ModuleNotFoundError:
             print('WARNING: TensorBoard writing requested but is not '
                   'available (are you using PyTorch 1.1.0 or later?), '
