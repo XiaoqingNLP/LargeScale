@@ -423,6 +423,8 @@ def _add_logging_args(parser):
 
     group.add_argument('--log-params-norm', action='store_true',
                        help='If set, calculate and log parameters norm.')
+    group.add_argument('--log-model-update', action='store_true',
+                       help='If set, calculate and log model update (will replicate initial model parameters).')
     group.add_argument('--log-num-zeros-in-grad', action='store_true',
                        help='If set, calculate and log the number of zeros in gradient.')
     group.add_argument('--tensorboard-log-interval', type=int, default=1,

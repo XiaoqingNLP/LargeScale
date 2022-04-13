@@ -48,7 +48,7 @@ from megatron.model.distributed import DistributedDataParallel as LocalDDP
 from megatron.utils import check_adlr_autoresume_termination, get_parameters_in_billions
 from megatron.utils import unwrap_model, found_kill_switch
 from megatron.data.data_samplers import build_pretraining_data_loader
-from megatron.utils import calc_params_l2_norm
+from megatron.utils import calc_params_l2_norm, store_initial_model, calc_model_update
 from megatron.schedules import forward_backward_no_pipelining
 from megatron.schedules import forward_backward_pipelining_without_interleaving
 from megatron.schedules import forward_backward_pipelining_with_interleaving
@@ -427,6 +427,10 @@ def setup_model_and_optimizer(model_provider_func):
         if args.fp16:
             optimizer.reload_model_params()
 
+    # store initial model for logging model update
+    if args.log_model_update:
+        store_initial_model(model)
+
     return model, optimizer, lr_scheduler
 
 
@@ -538,7 +542,7 @@ def train_step(forward_step_func, data_iterator,
 def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                  loss_scale, report_memory_flag, skipped_iter,
                  grad_norm, params_norm, num_zeros_in_grad,
-                 model=None):
+                 model_update, model=None):
     """Log training information such as losses, timing, ...."""
     args = get_args()
     timers = get_timers()
@@ -653,6 +657,12 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
             writer.add_scalar('params-norm/params-norm vs samples', params_norm,
                               args.consumed_train_samples)
             writer.add_scalar('params-norm/params-norm vs tokens', params_norm,
+                              args.consumed_train_tokens)
+        if model_update is not None:
+            writer.add_scalar('model-update/model-update', model_update, iteration)
+            writer.add_scalar('model-update/model-update vs samples', model_update,
+                              args.consumed_train_samples)
+            writer.add_scalar('model-update/model-update vs tokens', model_update,
                               args.consumed_train_tokens)
         if args.curriculum_learning:
             writer.add_scalar('curriculum_seqlen', args.curriculum_seqlen,
@@ -881,12 +891,15 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
         params_norm = None
         if args.log_params_norm:
             params_norm = calc_params_l2_norm(model)
+        model_update = None
+        if args.log_model_update:
+            model_update = calc_model_update(model)
         report_memory_flag = training_log(loss_dict, total_loss_dict,
                                           optimizer.param_groups[0]['lr'],
                                           iteration, loss_scale,
                                           report_memory_flag, skipped_iter,
                                           grad_norm, params_norm, num_zeros_in_grad,
-                                          model)
+                                          model_update, model)
 
         # Autoresume
         if args.adlr_autoresume and \

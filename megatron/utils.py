@@ -85,6 +85,52 @@ def calc_params_l2_norm(model):
     return norm_2.item() ** 0.5
 
 
+initial_params = []
+def store_initial_model(model):
+    from copy import deepcopy
+    global initial_params
+
+    if not isinstance(model, list):
+        model = [model]
+
+    for model_ in model:
+        initial_params.append(deepcopy(list(model_.parameters())))
+
+
+def calc_model_update(model):
+    """Calculate model update l2 norm against the initial model"""
+    global initial_model
+
+    args = get_args()
+    if not isinstance(model, list):
+        model = [model]
+    # Remove duplicate params.
+    params_data = []
+    for model_, initial_params_ in zip(model, initial_params):
+        for param, initial_param in zip(model_.parameters(), initial_params_):
+            is_not_shared = param_is_not_shared(param)
+            is_not_tp_duplicate = param_is_not_tensor_parallel_duplicate(param)
+            if is_not_shared and is_not_tp_duplicate:
+                if args.bf16:
+                    params_data.append((param.data.float() - initial_param.data.float()))
+                else:
+                    params_data.append(param.data - initial_param.data)
+    # Calculate norm
+    dummy_overflow_buf = torch.cuda.IntTensor([0])
+    norm, _ = multi_tensor_applier(
+        amp_C.multi_tensor_l2norm,
+        dummy_overflow_buf,
+        [params_data],
+        False # no per-parameter norm
+    )
+    norm_2 = norm * norm
+    # Sum across all model-parallel GPUs.
+    torch.distributed.all_reduce(norm_2,
+                                 op=torch.distributed.ReduceOp.SUM,
+                                 group=mpu.get_model_parallel_group())
+    return norm_2.item() ** 0.5
+
+
 def average_losses_across_data_parallel_group(losses):
     """Reduce a tensor of losses across all GPUs."""
     averaged_losses = torch.cat(
