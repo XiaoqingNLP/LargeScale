@@ -61,22 +61,18 @@ def build_train_valid_test_datasets(
     return train_dataset, valid_dataset, test_dataset
 
 
-def build_mask_matrix(separator, batch_size, seq_length, memory_length=0):
+def build_single_mask_matrix(separator, batch_size, seq_length, memory_length=0):
     dtype = torch.float
     m = torch.ones(
         (1, seq_length, seq_length), dtype=dtype, device=separator.device
     )
     m = torch.tril(m)
-    is_scalar = torch.numel(separator) == 1
-    if is_scalar:
-        m[0, :, :separator] = 1
-    else:
-        m = m.expand(batch_size, -1, -1)
-        ids = torch.arange(
-            seq_length, device=separator.device, dtype=separator.dtype
-        ).view(1, -1)
-        mask = ids < separator.view(-1, 1)
-        m = m.masked_fill(mask.unsqueeze(1).expand_as(m), 1)
+    m = m.expand(batch_size, -1, -1)
+    ids = torch.arange(
+        seq_length, device=separator.device, dtype=separator.dtype
+    ).view(1, -1)
+    mask = ids < separator.view(-1, 1)
+    m = m.masked_fill(mask.unsqueeze(1).expand_as(m), 1)
     if memory_length > 0:
         m = m.expand(batch_size, -1, -1)
         m = torch.cat(
@@ -91,3 +87,22 @@ def build_mask_matrix(separator, batch_size, seq_length, memory_length=0):
     m = m.unsqueeze(1)
     m = m < 0.5
     return m
+
+
+def build_mask_matrix(separator, batch_size, seq_length):
+    if separator.dim() == 1:
+        return build_single_mask_matrix(separator, batch_size=batch_size, seq_length=seq_length)
+    else:
+        aggregated_samples = separator.size(-1)
+        assert seq_length % aggregated_samples == 0
+        single_length = seq_length // aggregated_samples
+        m = torch.ones((batch_size, 1, seq_length, seq_length), dtype=torch.bool, device=separator.device)
+        for i in range(aggregated_samples):
+            single_mask = build_single_mask_matrix(separator[:, i], batch_size=batch_size, seq_length=single_length)
+            m[:, :, single_length * i: single_length * (i + 1), single_length * i: single_length * (i + 1)] = single_mask
+        return m
+
+
+if __name__ == "__main__":
+    separator = torch.tensor([[1, 2, 3], [3, 2, 1]], dtype=torch.int)
+    m = build_mask_matrix(separator, batch_size=2, seq_length=12)

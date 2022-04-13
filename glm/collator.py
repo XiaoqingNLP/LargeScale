@@ -142,29 +142,30 @@ class GLMPreprocessor:
         return data
 
     def pad_batch(self, tokens, targets, loss_masks, position_ids):
-        if len(tokens) >= self.max_seq_length:
-            tokens = tokens[: self.max_seq_length]
-            targets = targets[: self.max_seq_length]
-            loss_masks = loss_masks[: self.max_seq_length]
-            position_ids = position_ids[:, : self.max_seq_length]
+        max_seq_length = self.max_seq_length // self.aggregated_samples_per_sequence
+        if len(tokens) >= max_seq_length:
+            tokens = tokens[: max_seq_length]
+            targets = targets[: max_seq_length]
+            loss_masks = loss_masks[: max_seq_length]
+            position_ids = position_ids[:, : max_seq_length]
         else:
             tokens = np.concatenate(
                 (
                     tokens,
-                    np.zeros(self.max_seq_length - len(tokens), dtype=np.int),
+                    np.zeros(max_seq_length - len(tokens), dtype=np.int),
                 )
             )
             targets = np.concatenate(
                 (
                     targets,
-                    np.zeros(self.max_seq_length - len(targets), dtype=np.int),
+                    np.zeros(max_seq_length - len(targets), dtype=np.int),
                 )
             )
             loss_masks = np.concatenate(
                 (
                     loss_masks,
                     np.zeros(
-                        self.max_seq_length - len(loss_masks), dtype=np.int
+                        max_seq_length - len(loss_masks), dtype=np.int
                     ),
                 )
             )
@@ -172,7 +173,7 @@ class GLMPreprocessor:
                 (
                     position_ids,
                     np.zeros(
-                        (2, self.max_seq_length - position_ids.shape[1]),
+                        (2, max_seq_length - position_ids.shape[1]),
                         dtype=np.int,
                     ),
                 ),
@@ -180,12 +181,7 @@ class GLMPreprocessor:
             )
         return tokens, targets, loss_masks, position_ids
 
-    def get_input_data(self, input_ids, index=None):
-        if index is None:
-            rng = random.Random(self.count * self.device_num + self.rank)
-        else:
-            rng = random.Random(random.Random(index).randint(0, 2 ** 32 - 1))
-        self.count += 1
+    def _get_single_input_data(self, input_ids, rng):
         if rng.random() < self.short_seq_prob:
             input_ids = self.truncate_input(input_ids, rng)
         if rng.random() < self.bert_prob:
@@ -249,14 +245,41 @@ class GLMPreprocessor:
             tokens, targets, loss_masks, position_ids
         )
         # attention_mask = self.build_mask_matrix(division, self.max_seq_length)
+        division = np.array([division], dtype=np.int)
         return tokens, targets, loss_masks, position_ids, division
 
-    def get_multitask_data(self, text, target):
-        if len(text) + len(target) + 2 > self.max_seq_length:
-            text_length = max(int(0.25 * self.max_seq_length), self.max_seq_length - len(target) - 2)
+    def _pack_samples(self, sequences):
+        data = []
+        for sequence in zip(*sequences):
+            data.append(np.concatenate(sequence, axis=-1))
+        return data
+
+    def get_input_data(self, input_ids, index=None):
+        if index is None:
+            rng = random.Random(self.count * self.device_num + self.rank)
+        else:
+            rng = random.Random(random.Random(index).randint(0, 2 ** 32 - 1))
+        self.count += 1
+        if self.aggregated_samples_per_sequence > 1:
+            sequences = []
+            assert self.max_seq_length % self.aggregated_samples_per_sequence == 0
+            assert len(input_ids) % self.aggregated_samples_per_sequence == 0
+            input_length = len(input_ids) // self.aggregated_samples_per_sequence
+            for i in range(self.aggregated_samples_per_sequence):
+                data = self._get_single_input_data(
+                    input_ids[input_length * i: input_length * (i + 1)], rng)
+                sequences.append(data)
+            return self._pack_samples(sequences)
+        else:
+            return self._get_single_input_data(input_ids, rng)
+
+    def _get_single_multitask_data(self, text, target):
+        max_seq_length = self.max_seq_length // self.aggregated_samples_per_sequence
+        if len(text) + len(target) + 2 > max_seq_length:
+            text_length = max(int(0.25 * max_seq_length), max_seq_length - len(target) - 2)
             text = text[:text_length]
-        if len(text) + len(target) + 2 > self.max_seq_length:
-            target = target[:self.max_seq_length - len(text) - 2]
+        if len(text) + len(target) + 2 > max_seq_length:
+            target = target[:max_seq_length - len(text) - 2]
         dtype = text.dtype
         tokens = np.concatenate((text, [self.mask_id, self.sop_id], target))
         targets = np.concatenate((text, [self.mask_id], target, [self.eop_id]))
@@ -266,8 +289,19 @@ class GLMPreprocessor:
         block_position_ids = np.concatenate((np.zeros(len(text), dtype=dtype), np.arange(len(target) + 2, dtype=dtype)))
         position_ids = np.stack([position_ids, block_position_ids])
         tokens, targets, loss_masks, position_ids = self.pad_batch(tokens, targets, loss_masks, position_ids)
-        # attention_mask = self.build_mask_matrix(len(text) + 1, self.max_seq_length)
-        return tokens, targets, loss_masks, position_ids, len(text) + 1
+        # attention_mask = self.build_mask_matrix(len(text) + 1, max_seq_length)
+        return tokens, targets, loss_masks, position_ids, np.array([len(text) + 1], dtype=dtype)
+
+    def get_multitask_data(self, texts, targets):
+        if self.aggregated_samples_per_sequence > 1:
+            assert self.max_seq_length % self.aggregated_samples_per_sequence == 0
+            sequences = []
+            for text, target in zip(texts, targets):
+                data = self._get_single_multitask_data(text, target)
+                sequences.append(data)
+            return self._pack_samples(sequences)
+        else:
+            return self._get_single_multitask_data(texts, targets)
 
 
 def debug_block_data(data):
@@ -277,7 +311,7 @@ def debug_block_data(data):
     sep = int(attention_mask[0, 0].sum())
     text, last_segment = "", []
     for i, token_id in enumerate(tokens[:sep].tolist()):
-        if token_id == 1001 or token_id == 1002:
+        if token_id == 10001 or token_id == 10002:
             if last_segment:
                 text += " ".join(last_segment)
                 last_segment = []
@@ -289,7 +323,7 @@ def debug_block_data(data):
     print(text)
     last_index = None
     for i in range(sep, tokens.shape[0]):
-        if tokens[i] == 1003:
+        if tokens[i] == 10003:
             if last_index is not None:
                 print(
                     tokens[last_index:i].tolist(),
@@ -314,13 +348,17 @@ def debug_block_data(data):
 
 
 if __name__ == "__main__":
+    aggregated_samples_per_sequence = 4
+    max_seq_length = 2304
+    single_length = max_seq_length // aggregated_samples_per_sequence
     collator = GLMPreprocessor(
-        eod_id=1000,
-        mask_id=1001,
-        gmask_id=1002,
-        sop_id=1003,
-        eop_id=1004,
-        max_seq_length=576,
+        eod_id=10000,
+        mask_id=10001,
+        gmask_id=10002,
+        sop_id=10003,
+        eop_id=10004,
+        max_seq_length=max_seq_length,
+        aggregated_samples_per_sequence=aggregated_samples_per_sequence,
         gpt_prob=0.0,
         short_seq_prob=0.02,
         single_span_prob=0.02,
@@ -330,7 +368,7 @@ if __name__ == "__main__":
         rank=1,
         device_num=2,
     )
-    input_ids = np.arange(512)
+    input_ids = np.arange(2048)
     for _ in range(10):
         (
             tokens_,
@@ -339,14 +377,26 @@ if __name__ == "__main__":
             position_ids_,
             attention_mask_,
         ) = collator.get_input_data(input_ids)
-        debug_block_data(
-            (tokens_, targets_, loss_masks_, position_ids_, attention_mask_)
-        )
+        for i in range(aggregated_samples_per_sequence):
+            debug_block_data(
+                (tokens_[i * single_length: (i + 1) * single_length],
+                 targets_[i * single_length: (i + 1) * single_length],
+                 loss_masks_[i * single_length: (i + 1) * single_length],
+                 position_ids_[:, i * single_length: (i + 1) * single_length], collator.build_mask_matrix(
+                    attention_mask_[i], single_length))
+            )
         print()
-    text, target = np.arange(256), np.arange(1024, 1024 + 64)
-    tokens_, targets_, loss_masks_, position_ids_, attention_mask_ = collator.get_multitask_data(text, target)
-    debug_block_data((tokens_, targets_, loss_masks_, position_ids_, attention_mask_))
-    print()
+    texts, targets = [np.arange(256), np.arange(256, 512), np.arange(512, 768), np.arange(768, 1024)], [
+        np.arange(1024, 1024 + 64), np.arange(1024 + 64, 1024 + 128), np.arange(1024 + 128, 1024 + 192),
+        np.arange(1024 + 192, 1024 + 256)]
+    tokens_, targets_, loss_masks_, position_ids_, attention_mask_ = collator.get_multitask_data(texts, targets)
+    for i in range(aggregated_samples_per_sequence):
+        debug_block_data((tokens_[i * single_length: (i + 1) * single_length],
+                          targets_[i * single_length: (i + 1) * single_length],
+                          loss_masks_[i * single_length: (i + 1) * single_length],
+                          position_ids_[:, i * single_length: (i + 1) * single_length],
+                          collator.build_mask_matrix(attention_mask_[i], single_length)))
+        print()
     text, target = np.arange(1024), np.arange(1024, 1024 + 64)
     tokens_, targets_, loss_masks_, position_ids_, attention_mask_ = collator.get_multitask_data(text, target)
     debug_block_data((tokens_, targets_, loss_masks_, position_ids_, attention_mask_))
