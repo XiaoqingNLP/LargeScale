@@ -317,6 +317,9 @@ def parse_args(extra_args_provider=None, defaults={},
         except ModuleNotFoundError:
             raise ModuleNotFoundError("Please install bitsandbytes from https://github.com/facebookresearch/bitsandbytes.")
 
+    if args.deepnorm:
+        args.apply_residual_connection_post_layernorm = True
+
     _print_args(args)
     return args
 
@@ -382,6 +385,8 @@ def _add_network_size_args(parser):
                        'ordering.')
     group.add_argument('--embed-layernorm', action='store_true',
                        help='use layernorm for embedding')
+    group.add_argument('--deepnorm', action='store_true',
+                       help='use DeepNorm')
     group.add_argument('--openai-gelu', action='store_true',
                        help='Use OpenAIs GeLU implementation. This option'
                        'should not be used unless for backward compatibility'

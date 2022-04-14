@@ -40,6 +40,15 @@ def scaled_init_method_normal(sigma, num_layers):
     return init_
 
 
+def deepnorm_init_method(num_layers, gain=None):
+    beta = (2 * num_layers) ** -0.5 if gain is None else gain
+
+    def init_(tensor):
+        return torch.nn.init.xavier_normal_(tensor, gain=beta)
+
+    return init_
+
+
 def attention_mask_func(attention_scores, attention_mask):
     args = get_args()
     if args.curriculum_learning:

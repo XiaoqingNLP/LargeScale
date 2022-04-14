@@ -26,7 +26,7 @@ from megatron.enums import AttnMaskType, LayerType, AttnType, PositionEmbeddingT
 from megatron.model.fused_layer_norm import MixedFusedLayerNorm as LayerNorm
 from megatron.model.fused_softmax import FusedScaleMaskSoftmax
 from megatron.model.fused_bias_gelu import bias_gelu_impl
-from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu
+from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, deepnorm_init_method
 
 import deepspeed
 
@@ -156,8 +156,18 @@ class ParallelAttention(MegatronModule):
                 3 * projection_size,
                 gather_output=False,
                 init_method=init_method)
+            if args.deepnorm:
+                import deepspeed.runtime.activation_checkpointing.checkpointing as ds_checkpointing
+                if ds_checkpointing.is_configured():
+                    _get_cuda_rng_tracker = ds_checkpointing.get_cuda_rng_tracker
+                else:
+                    assert False
+                # Scale value weight with beta
+                with _get_cuda_rng_tracker().fork():
+                    output_layer_init_method(self.query_key_value.weight.split(projection_size, dim=-1)[-1])
         else:
             assert attention_type == AttnType.cross_attn
+            assert not args.deepnorm
             self.query = mpu.ColumnParallelLinear(
                 args.hidden_size,
                 projection_size,
@@ -459,6 +469,9 @@ class ParallelTransformerLayer(MegatronModule):
         self.bf16 = args.bf16
         self.fp32_residual_connection = args.fp32_residual_connection
 
+        self.deepnorm = args.deepnorm
+        self.deepnorm_alpha = (2 * args.num_layers) ** 0.5
+
         # Layernorm on the input data.
         self.input_layernorm = LayerNorm(
             args.hidden_size,
@@ -466,8 +479,10 @@ class ParallelTransformerLayer(MegatronModule):
 
         # Self attention.
         self.self_attention = ParallelAttention(
-            init_method,
-            output_layer_init_method,
+            deepnorm_init_method(args.num_layers, gain=1.0)
+            if self.deepnorm else init_method,
+            deepnorm_init_method(args.num_layers)
+            if self.deepnorm else output_layer_init_method,
             layer_number,
             attention_type=AttnType.self_attn,
             attn_mask_type=self_attn_mask_type)
@@ -491,8 +506,10 @@ class ParallelTransformerLayer(MegatronModule):
                 eps=args.layernorm_epsilon)
 
         # MLP
-        self.mlp = ParallelMLP(init_method,
-                               output_layer_init_method)
+        self.mlp = ParallelMLP(deepnorm_init_method(args.num_layers)
+                                   if self.deepnorm else init_method,
+                               deepnorm_init_method(args.num_layers)
+                                   if self.deepnorm else output_layer_init_method)
 
         # Alibi
         if args.position_embedding_type == PositionEmbeddingType.alibi:
@@ -555,7 +572,7 @@ class ParallelTransformerLayer(MegatronModule):
             layernorm_input = bias_dropout_add_func(
                 attention_output,
                 attention_bias.expand_as(residual),
-                residual,
+                (residual * self.deepnorm_alpha) if self.deepnorm else residual,
                 self.hidden_dropout)
 
         # Layer norm post the self attention.
@@ -600,7 +617,7 @@ class ParallelTransformerLayer(MegatronModule):
             output = bias_dropout_add_func(
                 mlp_output,
                 mlp_bias.expand_as(residual),
-                residual,
+                (residual * self.deepnorm_alpha) if self.deepnorm else residual,
                 self.hidden_dropout)
 
         if get_key_value:
