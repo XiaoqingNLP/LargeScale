@@ -127,7 +127,7 @@ class BlockedRandomSplitDataset(Dataset):
         return self.wrapped_data[(index // len(self.indices)) * self.block_size + self.indices[index % len(self.indices)]]
 
 
-def split_ds(ds, split=[.8,.2,.0], block_size = 10000):
+def split_ds(ds, split=[.8,.2,.0], block_size = 10000, seed=1130):
     """
     Split a dataset into subsets given proportions of how
     much to allocate per split. If a split is 0% returns None for that split.
@@ -148,7 +148,8 @@ def split_ds(ds, split=[.8,.2,.0], block_size = 10000):
     start_idx = 0
     residual_idx = 0
     rtn_ds = [None]*len(split)
-    indices = np.random.permutation(np.array(range(block_size)))
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(np.array(range(block_size)))
     for i, f in enumerate(split):
         if f != 0:
             proportion = block_size*split[i]
