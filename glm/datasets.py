@@ -127,6 +127,22 @@ class BlockedRandomSplitDataset(Dataset):
         return self.wrapped_data[(index // len(self.indices)) * self.block_size + self.indices[index % len(self.indices)]]
 
 
+class AggregatedDataset(Dataset):
+    '''
+    Dataset wrapper to aggregate multiple samples
+    '''
+    def __init__(self, ds, aggregated_sample_num):
+        self.wrapped_data = ds
+        self.aggregated_sample_num = aggregated_sample_num
+
+    def __len__(self):
+        return len(self.wrapped_data) // self.aggregated_sample_num
+
+    def __getitem__(self, index):
+        return [self.wrapped_data[index * self.aggregated_sample_num + offset]
+                    for offset in range(self.aggregated_sample_num)]
+
+
 def split_ds(ds, split=[.8,.2,.0], block_size = 10000, seed=1130):
     """
     Split a dataset into subsets given proportions of how
