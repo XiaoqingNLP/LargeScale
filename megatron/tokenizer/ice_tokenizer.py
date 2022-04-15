@@ -16,7 +16,7 @@ class _IceTokenizer(AbstractTokenizer):
         self.num_tokens = 150000
         self.special_tokens = {}
         self.special_tokens_decoder = {}
-        self.set_special_tokens(['eod', 'MASK', 'gMASK', 'sop', 'eop'])
+        self.set_special_tokens(['MASK', 'gMASK', 'sMASK', 'eod', 'sop', 'eop', 'ENC', 'dBLOCK'])
         self.sentence_end_decoder = {20007: '.', 20031: '？', 20035: '！', 20027: '；', 20012: ':', 83823: '。', 145670: '…'}
 
     def set_special_tokens(self, special_tokens):
