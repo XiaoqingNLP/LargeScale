@@ -301,7 +301,7 @@ class GLMPreprocessor:
                 sequences.append(data)
             return self._pack_samples(sequences)
         else:
-            return self._get_single_multitask_data(texts, targets)
+            return self._get_single_multitask_data(texts[0], targets[0])
 
 
 def debug_block_data(data):

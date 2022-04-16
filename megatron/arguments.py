@@ -937,6 +937,10 @@ def _add_data_args(parser):
                        'specific positions. This option tries to un-bias the loss by reweighting loss on specific '
                        'positions based on how frequently we train on that position.'
                        'This is mostly used for prefix_lm training')
+    group.add_argument("--multitask-data-path", type=str, default=None,
+                       help="Multitask data path")
+    group.add_argument("--multitask-ratio", type=float, default=0.05,
+                       help="Ratio of multitask training data")
 
     return parser
 

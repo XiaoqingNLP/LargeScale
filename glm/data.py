@@ -1,8 +1,10 @@
 import torch
+import numpy as np
+import os
 
-from .datasets import BinaryDataset, RandomMappingDataset, split_ds
+from .datasets import BinaryDataset, RandomMappingDataset, LMDBDataset, ConcatDataset, AggregatedDataset, split_ds
 from .collator import GLMPreprocessor
-from megatron import get_tokenizer
+from megatron import get_tokenizer, print_rank_0
 
 
 def get_input(tokens, targets, loss_masks, position_ids, division):
@@ -13,6 +15,30 @@ def get_input(tokens, targets, loss_masks, position_ids, division):
         "position_id": torch.tensor(position_ids, dtype=torch.long),
         "attention_mask": torch.tensor(division, dtype=torch.long),
     }
+
+
+def get_multitask_data(mutlitask_data_path, collator: GLMPreprocessor, aggregated_samples_per_sequence=1):
+    train_datasets, val_datasets = [], []
+    for path in sorted(os.listdir(mutlitask_data_path)):
+        full_path = os.path.join(mutlitask_data_path, path)
+        if os.path.isdir(full_path):
+            print_rank_0(f"Loading multitask data {full_path}")
+            data = LMDBDataset(full_path, process_fn=lambda x: x)
+            if path.endswith("eval"):
+                val_datasets.append(data)
+            else:
+                train_datasets.append(data)
+
+    def process_fn(samples):
+        # unpack List[(token, label)] to -> (List[tokens], List[labels])
+        return get_input(*collator.get_multitask_data(*list(zip(*samples))))
+
+    # We need a random mapping here or will lose some task when multitask_ratio < actual data ratio
+    train_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(train_datasets)),
+                                       aggregated_samples_per_sequence, process_fn)
+    val_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(val_datasets)), aggregated_samples_per_sequence,
+                                     process_fn)
+    return train_datasets, val_datasets
 
 
 def build_train_valid_test_datasets(
@@ -41,15 +67,28 @@ def build_train_valid_test_datasets(
 
     dataset = BinaryDataset(
         f"{data_prefix[0]}.bin",
-        lambda *args: get_input(*collator.get_input_data(*args)),
+        lambda tokens, index: get_input(*collator.get_input_data(np.array(tokens), index)),  # np.memmap -> np.array
         length_per_sample=length_per_sample,
     )
     train_dataset, valid_dataset, test_dataset = split_ds(
         dataset, [float(s) for s in splits_string.split(",")], block_size=10000
     )
-    print(
-        f"    train: {len(train_dataset)}, valid: {len(valid_dataset)}, test: {len(test_dataset)}"
+    print_rank_0(
+        f"    text_train: {len(train_dataset)}, text_valid: {len(valid_dataset)}, text_test: {len(test_dataset)}"
     )
+
+    if args.multitask_data_path is not None:
+        multitask_train_dataset, multitask_valid_dataset = \
+            get_multitask_data(args.multitask_data_path, collator, aggregated_samples_per_sequence)
+        print_rank_0(f"    multitask_train: {len(multitask_train_dataset)}, multitask_valid: {len(multitask_valid_dataset)}")
+
+        def calc_weight(ds1, ds2, ratio):
+            return [1, 1] if ratio is None else [1, ratio * len(ds1) / (len(ds2) * (1 - ratio))]
+
+        train_dataset = ConcatDataset([train_dataset, multitask_train_dataset],
+                                      weights=calc_weight(train_dataset, multitask_train_dataset, args.multitask_ratio))
+        valid_dataset = ConcatDataset([valid_dataset, multitask_valid_dataset],
+                                      weights=calc_weight(valid_dataset, multitask_valid_dataset, args.multitask_ratio))
 
     scale = max(200, 1 + train_valid_test_num_samples[0] // len(train_dataset))
     train_dataset = RandomMappingDataset(train_dataset, scale=scale)

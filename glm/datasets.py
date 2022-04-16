@@ -16,6 +16,7 @@ import numpy as np
 import pickle
 
 from torch.utils.data import Dataset
+from bisect import bisect_right
 
 
 class LMDBDataset(Dataset):
@@ -85,6 +86,48 @@ class TSVDataset(Dataset):
         return self.process_fn(self.items[index])
 
 
+class ConcatDataset(Dataset):
+    """
+    Dataset to concatenate multiple datasets.
+    Purpose: useful to assemble different existing datasets, possibly
+    large-scale datasets as the concatenation operation is done in an
+    on-the-fly manner.
+    Arguments:
+        datasets (sequence): List of datasets to be concatenated.
+    """
+
+    @staticmethod
+    def cumsum(sequence, weights):
+        r, s = [], 0
+        for i, e in enumerate(sequence):
+            l = int(len(e) * weights[i])
+            r.append(l + s)
+            s += l
+        return r
+
+    def __init__(self, datasets, weights=None, **kwargs):
+        super(ConcatDataset, self).__init__()
+        assert len(datasets) > 0, "datasets should not be an empty iterable"
+        self.datasets = list(datasets)
+        if weights is None:
+            self.weights = [1] * len(self.datasets)
+        else:
+            self.weights = weights
+        self.cumulative_sizes = self.cumsum(self.datasets, self.weights)
+
+    def __len__(self):
+        return self.cumulative_sizes[-1]
+
+    def __getitem__(self, idx):
+        dataset_idx = bisect_right(self.cumulative_sizes, idx)
+        if dataset_idx == 0:
+            sample_idx = idx
+        else:
+            sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
+        sample_idx = sample_idx % len(self.datasets[dataset_idx])
+        return self.datasets[dataset_idx][sample_idx]
+
+
 class RandomMappingDataset(Dataset):
     '''
     Dataset wrapper to randomly mapping indices to original order.
@@ -131,16 +174,17 @@ class AggregatedDataset(Dataset):
     '''
     Dataset wrapper to aggregate multiple samples
     '''
-    def __init__(self, ds, aggregated_sample_num):
+    def __init__(self, ds, aggregated_sample_num, process_fn):
         self.wrapped_data = ds
         self.aggregated_sample_num = aggregated_sample_num
+        self.process_fn = process_fn
 
     def __len__(self):
         return len(self.wrapped_data) // self.aggregated_sample_num
 
     def __getitem__(self, index):
-        return [self.wrapped_data[index * self.aggregated_sample_num + offset]
-                    for offset in range(self.aggregated_sample_num)]
+        return self.process_fn([self.wrapped_data[index * self.aggregated_sample_num + offset]
+                    for offset in range(self.aggregated_sample_num)])
 
 
 def split_ds(ds, split=[.8,.2,.0], block_size = 10000, seed=1130):
