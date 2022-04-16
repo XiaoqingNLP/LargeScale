@@ -21,6 +21,7 @@ import numbers
 import torch
 from torch.nn.parameter import Parameter
 from torch.nn import init
+from megatron import get_args
 import importlib
 
 global fused_mix_prec_layer_norm_cuda
@@ -63,6 +64,7 @@ class MixedFusedLayerNorm(torch.nn.Module):
 
   def __init__(self, normalized_shape, eps=1e-5):
         super(MixedFusedLayerNorm, self).__init__()
+        args = get_args()
 
         global fused_mix_prec_layer_norm_cuda
         fused_mix_prec_layer_norm_cuda = importlib.import_module(
@@ -75,6 +77,7 @@ class MixedFusedLayerNorm(torch.nn.Module):
         self.weight = Parameter(torch.Tensor(*normalized_shape))
         self.bias = Parameter(torch.Tensor(*normalized_shape))
         self.reset_parameters()
+        self.apply_pb_relax = args.apply_pb_relax
 
 
   def reset_parameters(self):
@@ -84,7 +87,6 @@ class MixedFusedLayerNorm(torch.nn.Module):
 
 
   def forward(self, input):
-
-    return FusedLayerNormAffineFunction.apply(
-      input, self.weight, self.bias, self.normalized_shape,self.eps)
-
+      return FusedLayerNormAffineFunction.apply(input / (input.abs().max().detach() / 8)
+                                                if self.apply_pb_relax else input, self.weight, self.bias,
+                                                self.normalized_shape, self.eps)

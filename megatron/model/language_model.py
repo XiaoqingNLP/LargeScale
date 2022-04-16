@@ -336,6 +336,9 @@ class EmbeddingPipe(Embedding):
         if hasattr(self._args, 'attn_mask'):
             return embeddings
         else:
+            if (self._args.position_embedding_type == PositionEmbeddingType.rotary and
+                    self._args.glm):
+                return embeddings, attention_mask, position_ids
             return embeddings, attention_mask
 
 
