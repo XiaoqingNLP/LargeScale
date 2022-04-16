@@ -32,7 +32,7 @@ import deepspeed
 
 from .glu_activations import GLU_ACTIVATIONS
 from .positional_embeddings import RotaryEmbedding, apply_rotary_pos_emb_torch, apply_rotary_pos_emb, \
-    apply_rotary_pos_emb_index_torch, apply_rotary_pos_emb_index
+    apply_rotary_pos_emb_index_torch, apply_rotary_pos_emb_index, apply_rotary_pos_emb_index_fused
 
 # flags required to enable jit fusion kernels
 torch._C._jit_set_profiling_mode(False)
@@ -218,13 +218,13 @@ class ParallelAttention(MegatronModule):
                 self.hidden_size_per_attention_head,
                 base=10000,
                 precision=args.params_dtype,
-                learnable=args.glm)
+                learnable=args.learnable_rotary_embedding)
             if args.glm:
                 self.block_rotary_emb = RotaryEmbedding(
                     self.hidden_size_per_attention_head,
                     base=1000,
                     precision=args.params_dtype,
-                    learnable=args.glm)
+                    learnable=args.learnable_rotary_embedding)
 
         self.apply_pb_relax = args.apply_pb_relax
         self.pb_relax_alpha = args.pb_relax_alpha
@@ -324,9 +324,10 @@ class ParallelAttention(MegatronModule):
                 # [sq, b], [sq, b]
                 position_ids, block_position_ids = position_ids[:, 0], position_ids[:, 1]
                 cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
-                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
-                cos, sin = self.block_rotary_emb(value_layer, seq_len=block_position_ids.max() + 1)
-                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, block_position_ids)
+                # query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
+                cos_block, sin_block = self.block_rotary_emb(value_layer, seq_len=block_position_ids.max() + 1)
+                # query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, block_position_ids)
+                query_layer, key_layer = apply_rotary_pos_emb_index_fused(query_layer, key_layer, cos, sin, position_ids, cos_block, sin_block, block_position_ids)
             else:
                 apply_rotary_fn = apply_rotary_pos_emb_torch if self.bf16 else apply_rotary_pos_emb
 

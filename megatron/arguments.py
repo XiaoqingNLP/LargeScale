@@ -402,6 +402,8 @@ def _add_network_size_args(parser):
                        default=PositionEmbeddingType.absolute,
                        help='Define position embedding type ("absolute" | "rotary" | "alibi"). "absolute" by default.'
                        )
+    group.add_argument('--learnable-rotary-embedding', action='store_true',
+                       help='If set, make rotary embedding learnable.')
     group.add_argument('--glu-activation', type=str,
                        choices=megatron.model.glu_activations.GLU_ACTIVATIONS.keys(),
                        help='GLU activations to use.'
