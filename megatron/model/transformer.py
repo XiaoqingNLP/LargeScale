@@ -31,7 +31,8 @@ from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, dee
 import deepspeed
 
 from .glu_activations import GLU_ACTIVATIONS
-from .positional_embeddings import RotaryEmbedding, apply_rotary_pos_emb_torch, apply_rotary_pos_emb
+from .positional_embeddings import RotaryEmbedding, apply_rotary_pos_emb_torch, apply_rotary_pos_emb, \
+    apply_rotary_pos_emb_index_torch, apply_rotary_pos_emb_index
 
 # flags required to enable jit fusion kernels
 torch._C._jit_set_profiling_mode(False)
@@ -213,13 +214,24 @@ class ParallelAttention(MegatronModule):
             checkpoint = deepspeed.checkpointing.checkpoint
 
         if self.position_embedding_type == PositionEmbeddingType.rotary:
-            self.rotary_emb = RotaryEmbedding(self.hidden_size_per_attention_head, precision=args.params_dtype)
+            self.rotary_emb = RotaryEmbedding(
+                self.hidden_size_per_attention_head,
+                base=10000,
+                precision=args.params_dtype,
+                learnable=args.glm)
+            if args.glm:
+                self.block_rotary_emb = RotaryEmbedding(
+                    self.hidden_size_per_attention_head,
+                    base=1000,
+                    precision=args.params_dtype,
+                    learnable=args.glm)
 
         self.apply_pb_relax = args.apply_pb_relax
         self.pb_relax_alpha = args.pb_relax_alpha
 
     def forward(self, hidden_states, attention_mask, layer_past=None,
-                get_key_value=False, encoder_output=None, alibi=None):
+                get_key_value=False, encoder_output=None, alibi=None,
+                position_ids=None):
         # hidden_states: [sq, b, h]
 
         # =====================
@@ -305,15 +317,26 @@ class ParallelAttention(MegatronModule):
 
         # Rotary embeddings
         if self.position_embedding_type == PositionEmbeddingType.rotary:
-            apply_rotary_fn = apply_rotary_pos_emb_torch if self.bf16 else apply_rotary_pos_emb
+            if position_ids is not None:
+                apply_rotary_fn = apply_rotary_pos_emb_index_torch if self.bf16 else apply_rotary_pos_emb_index
+                # [b, 2, sq] -> [sq, 2, b]
+                position_ids = position_ids.transpose(0, 2)
+                # [sq, b], [sq, b]
+                position_ids, block_position_ids = position_ids[:, 0], position_ids[:, 1]
+                cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
+                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
+                cos, sin = self.block_rotary_emb(value_layer, seq_len=block_position_ids.max() + 1)
+                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, block_position_ids)
+            else:
+                apply_rotary_fn = apply_rotary_pos_emb_torch if self.bf16 else apply_rotary_pos_emb
 
-            seq_len = key_layer.shape[0]
-            offset = 0
-            if layer_past is not None and layer_past.numel() > 0:
-                offset = layer_past[0].shape[0]
-                seq_len += offset
-            cos, sin = self.rotary_emb(value_layer, seq_len=seq_len)
-            query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, offset=offset)
+                seq_len = key_layer.shape[0]
+                offset = 0
+                if layer_past is not None and layer_past.numel() > 0:
+                    offset = layer_past[0].shape[0]
+                    seq_len += offset
+                cos, sin = self.rotary_emb(value_layer, seq_len=seq_len)
+                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, offset=offset)
 
         # Raw attention scores. [b * np, sq, sk]
         if alibi is None:
@@ -530,7 +553,7 @@ class ParallelTransformerLayer(MegatronModule):
 
     def forward(self, hidden_states, attention_mask,
                 encoder_output=None, enc_dec_attn_mask=None,
-                layer_past=None, get_key_value=False):
+                layer_past=None, get_key_value=False, position_ids=None):
         # hidden_states: [b, s, h]
 
         # Layer norm at the beginning of the transformer layer.
@@ -541,7 +564,8 @@ class ParallelTransformerLayer(MegatronModule):
                                 attention_mask,
                                 layer_past=layer_past,
                                 get_key_value=get_key_value,
-                                alibi=self.alibi)
+                                alibi=self.alibi,
+                                position_ids=position_ids)
 
         if get_key_value:
             attention_output, presents = attention_output
@@ -689,6 +713,14 @@ class ParallelTransformerLayerPipe(ParallelTransformerLayer):
             # Attention mask is an activation.
             hidden_states, attention_mask = inputs[0], inputs[1]
             return super().forward(*inputs, **kwargs), attention_mask
+        elif len(inputs) == 3:
+            if not hasattr(self, '_args'):
+                self._args = get_args()
+            assert (self._args.position_embedding_type == PositionEmbeddingType.rotary and
+                    self._args.glm)
+            hidden_states, attention_mask, position_ids = inputs[0], inputs[1], inputs[2]
+            return super().forward(hidden_states, attention_mask, **kwargs, position_ids=position_ids), \
+                attention_mask, position_ids
         else:
             raise RuntimeError('Received more inputs than understood.')
 
