@@ -62,22 +62,45 @@ def apply_rotary_pos_emb_torch(q, k, cos, sin, offset: int = 0):  # jitting fail
 
 @torch.jit.script
 def apply_rotary_pos_emb_index(q, k, cos, sin, position_id):
-    # q: [sq, b * np, hn], position_id: [sq, b]
-    cos, sin = F.embedding(position_id, cos.squeeze(1)), F.embedding(position_id, sin.squeeze(1))
-    return (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
+    # position_id: [sq, b], q: [sq, b * np, hn] -> [sq, b, np, hn], cos: [sq, 1, hn] -> [sq, b, 1, hn]
+    sq, b, np = position_id.size(0), position_id.size(1), q.size(1) // position_id.size(1)
+    q, k = q.view(sq, b, np, -1), k.view(sq, b, np, -1)
+    cos, sin = F.embedding(position_id, cos.squeeze(1)).unsqueeze(2), \
+               F.embedding(position_id, sin.squeeze(1)).unsqueeze(2)
+    q, k = (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
+    return q.view(sq, b * np, -1), k.view(sq, b * np, -1)
+
+
+def apply_rotary_pos_emb_index_torch(q, k, cos, sin, position_id):  # jitting fails with bf16
+    sq, b, np = position_id.size(0), position_id.size(1), q.size(1) // position_id.size(1)
+    q, k = q.view(sq, b, np, -1), k.view(sq, b, np, -1)
+    cos, sin = F.embedding(position_id, cos.squeeze(1)).unsqueeze(2), \
+               F.embedding(position_id, sin.squeeze(1)).unsqueeze(2)
+    q, k = (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
+    return q.view(sq, b * np, -1), k.view(sq, b * np, -1)
 
 
 @torch.jit.script
 def apply_rotary_pos_emb_index_fused(q, k, cos, sin, position_id, cos_block, sin_block, block_position_id):
-    # q: [sq, b * np, hn], position_id: [sq, b]
-    cos, sin = F.embedding(position_id, cos.squeeze(1)), F.embedding(position_id, sin.squeeze(1))
-    cos_block, sin_block = F.embedding(block_position_id, cos_block.squeeze(1)), F.embedding(block_position_id, sin_block.squeeze(1))
+    # position_id: [sq, b], q: [sq, b * np, hn] -> [sq, b, np, hn], cos: [sq, 1, hn] -> [sq, b, 1, hn]
+    sq, b, np = position_id.size(0), position_id.size(1), q.size(1) // position_id.size(1)
+    q, k = q.view(sq, b, np, -1), k.view(sq, b, np, -1)
+    cos, sin = F.embedding(position_id, cos.squeeze(1)).unsqueeze(2),\
+               F.embedding(position_id, sin.squeeze(1)).unsqueeze(2)
+    cos_block, sin_block = F.embedding(block_position_id, cos_block.squeeze(1)).unsqueeze(2), \
+                            F.embedding(block_position_id, sin_block.squeeze(1)).unsqueeze(2)
     q, k = (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
     q, k = (q * cos_block) + (rotate_half(q) * sin_block), (k * cos_block) + (rotate_half(k) * sin_block)
-    return q, k
+    return q.view(sq, b * np, -1), k.view(sq, b * np, -1)
 
 
-@torch.jit.script
-def apply_rotary_pos_emb_index_torch(q, k, cos, sin, position_id):  # jitting fails with bf16
-    cos, sin = F.embedding(position_id, cos.squeeze(1)), F.embedding(position_id, sin.squeeze(1))
-    return (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
+def apply_rotary_pos_emb_index_fused_torch(q, k, cos, sin, position_id, cos_block, sin_block, block_position_id):
+    sq, b, np = position_id.size(0), position_id.size(1), q.size(1) // position_id.size(1)
+    q, k = q.view(sq, b, np, -1), k.view(sq, b, np, -1)
+    cos, sin = F.embedding(position_id, cos.squeeze(1)).unsqueeze(2),\
+               F.embedding(position_id, sin.squeeze(1)).unsqueeze(2)
+    cos_block, sin_block = F.embedding(block_position_id, cos_block.squeeze(1)).unsqueeze(2), \
+                            F.embedding(block_position_id, sin_block.squeeze(1)).unsqueeze(2)
+    q, k = (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
+    q, k = (q * cos_block) + (rotate_half(q) * sin_block), (k * cos_block) + (rotate_half(k) * sin_block)
+    return q.view(sq, b * np, -1), k.view(sq, b * np, -1)
