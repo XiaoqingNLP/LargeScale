@@ -313,7 +313,7 @@ class ParallelAttention(MegatronModule):
                 dtype=query_layer.dtype,
                 device=torch.cuda.current_device())
         else:
-            matmul_result = alibi[:output_size[0]*output_size[1], :, :output_size[3]]
+            matmul_result = alibi[:output_size[0]*output_size[1], :, :output_size[3]] if alibi.size(1) == 1 else alibi
 
         # Rotary embeddings
         if self.position_embedding_type == PositionEmbeddingType.rotary:
@@ -538,7 +538,9 @@ class ParallelTransformerLayer(MegatronModule):
 
         # Alibi
         if args.position_embedding_type == PositionEmbeddingType.alibi:
-            self.alibi = self._build_alibi_tensor(args.seq_length, args.num_attention_heads, args.micro_batch_size).to(torch.cuda.current_device())
+            # For glm, forward input will pass alibi, so we only calculate slopes here
+            self.alibi = self._build_alibi_tensor(args.seq_length, args.num_attention_heads, args.micro_batch_size,
+                                                  slopes_only=args.glm).to(torch.cuda.current_device())
             if args.params_dtype == torch.float16:
                 self.alibi = self.alibi.to(torch.float16)
             elif args.params_dtype == torch.bfloat16:
@@ -566,7 +568,11 @@ class ParallelTransformerLayer(MegatronModule):
                                 attention_mask,
                                 layer_past=layer_past,
                                 get_key_value=get_key_value,
-                                alibi=self.alibi,
+                                alibi=None if self.alibi is None
+                                else self.alibi if position_ids is None
+                                else self._multiply_alibi_slopes(
+                                    position_ids, self.alibi
+                                ),  # for glm, we pass position_ids as alibi matrix without head specific slopes
                                 position_ids=position_ids)
 
         if get_key_value:
@@ -652,7 +658,7 @@ class ParallelTransformerLayer(MegatronModule):
         return output
 
     @staticmethod
-    def _build_alibi_tensor(max_seq_len, num_attention_heads, batch_size):
+    def _build_alibi_tensor(max_seq_len, num_attention_heads, batch_size, slopes_only=False):
         # Based on https://github.com/ofirpress/attention_with_linear_biases/blob/a35aaca144e0eb6b789dfcb46784c4b8e31b7983/fairseq/models/transformer.py#L742
         """Returns tensor shaped (batch_size * num_attention_heads, 1, max_seq_len)"""
 
@@ -676,10 +682,23 @@ class ParallelTransformerLayer(MegatronModule):
         #Select the part of the tensor that corresponds to our tensor parallel index.
         tp_world_size = mpu.get_tensor_model_parallel_world_size()
         tp_index = mpu.get_tensor_model_parallel_rank()
+        if slopes_only:
+            return slopes.reshape((tp_world_size, -1))[tp_index]
         alibi = alibi.reshape((tp_world_size, -1, *alibi.shape[1:]))[tp_index]
         
         alibi = alibi.repeat(batch_size, 1, 1)
         return alibi
+
+    @staticmethod
+    @torch.jit.script
+    def _multiply_alibi_slopes(alibi, slopes):
+        """
+            Return tensor shaped (batch_size * num_attention_heads, seq_len, seq_len)
+            alibi: [batch_size, seq_len, seq_len], slopes: [num_attention_heads]
+        """
+        return slopes.view(-1, 1, 1).repeat([alibi.size(0), 1, 1]) * \
+            alibi.repeat_interleave(slopes.size(0), dim=0)
+
 
 class ParallelTransformerLayerPipe(ParallelTransformerLayer):
     """Extends ParallelTransformerLayer to forward attention_mask through the pipeline.
@@ -718,11 +737,16 @@ class ParallelTransformerLayerPipe(ParallelTransformerLayer):
         elif len(inputs) == 3:
             if not hasattr(self, '_args'):
                 self._args = get_args()
-            assert (self._args.position_embedding_type == PositionEmbeddingType.rotary and
-                    self._args.glm)
-            hidden_states, attention_mask, position_ids = inputs[0], inputs[1], inputs[2]
-            return super().forward(hidden_states, attention_mask, **kwargs, position_ids=position_ids), \
-                attention_mask, position_ids
+            if (
+                self._args.position_embedding_type
+                in [PositionEmbeddingType.rotary, PositionEmbeddingType.alibi]
+                and self._args.glm
+            ):
+                hidden_states, attention_mask, position_ids = inputs[0], inputs[1], inputs[2]
+                return super().forward(hidden_states, attention_mask, **kwargs, position_ids=position_ids), \
+                       attention_mask, position_ids
+            else:
+                raise RuntimeError('Received more inputs than understood.')
         else:
             raise RuntimeError('Received more inputs than understood.')
 

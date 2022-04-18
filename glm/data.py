@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import os
 
+from megatron.enums import PositionEmbeddingType
 from .datasets import BinaryDataset, RandomMappingDataset, LMDBDataset, ConcatDataset, AggregatedDataset, split_ds
 from .collator import GLMPreprocessor
 from megatron import get_tokenizer, print_rank_0
@@ -61,6 +62,7 @@ def build_train_valid_test_datasets(
         mask_ratio=args.mask_prob,
         average_block_length=args.average_block_length,
         min_gmask_ratio=args.min_gmask_ratio,
+        relative_pos_encoding=args.position_embedding_type == PositionEmbeddingType.alibi,
         rank=0,
         device_num=1,
     )
