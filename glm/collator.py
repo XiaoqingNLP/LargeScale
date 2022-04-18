@@ -199,7 +199,8 @@ class GLMPreprocessor:
         tokens = np.concatenate(tokens, axis=-1)
         targets = np.concatenate(targets, axis=-1)
         loss_masks = np.concatenate(loss_masks, axis=-1)
-        position_ids = block_diag(*position_ids)
+        position_ids = block_diag(*position_ids) if self.relative_pos_encoding \
+            else np.concatenate(position_ids, axis=-1)
         division = np.concatenate(division, axis=-1)
         return tokens, targets, loss_masks, position_ids, division
 
