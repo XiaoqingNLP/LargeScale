@@ -409,6 +409,9 @@ def _add_network_size_args(parser):
                        choices=megatron.model.glu_activations.GLU_ACTIVATIONS.keys(),
                        help='GLU activations to use.'
                        )
+    group.add_argument('--gated-attention-unit', action='store_true',
+                       help='Use GatedAttention Unit'
+                       )
 
     group.add_argument('--kill-switch-path', type=str,
                        help='path to look for a kill switch, which if found will automatically exit the program'

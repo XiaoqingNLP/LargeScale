@@ -32,7 +32,7 @@ from deepspeed.pipe import PipelineModule, LayerSpec, TiedLayerSpec
 from megatron.model.fused_layer_norm import MixedFusedLayerNorm as LayerNorm
 from megatron.model.module import float16_to_fp32
 from .language_model import EmbeddingPipe
-from .transformer import ParallelTransformerLayerPipe
+from .transformer import ParallelTransformerLayerPipe, GatedAttentionUnitPipe
 
 
 def post_language_model_processing(lm_output, labels, logit_weights,
@@ -249,7 +249,8 @@ class GPTModelPipe(PipelineModule,MegatronModule):
 
         for layer_idx in range(args.num_layers):
             self.specs.append(
-                LayerSpec(ParallelTransformerLayerPipe,
+                LayerSpec(GatedAttentionUnitPipe if args.gated_attention_unit
+                    else ParallelTransformerLayerPipe,
                     init_method=init_method,
                     output_layer_init_method=scaled_init_method_normal(args.init_method_std,
                                                                        args.num_layers),
@@ -324,3 +325,9 @@ class GPTModelPipe(PipelineModule,MegatronModule):
                          topology=topo,
                          activation_checkpoint_interval=interval,
                          partition_method=partition_method)
+
+    def _is_checkpointable(self, funcs):
+        """Hack for our new layers (GAU) since deepspeed hard code this logic"""
+        if all('GatedAttentionUnitPipe' in f.__class__.__name__ for f in funcs):
+            return True
+        return super(GPTModelPipe, self)._is_checkpointable(funcs)

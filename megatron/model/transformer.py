@@ -33,6 +33,7 @@ import deepspeed
 from .glu_activations import GLU_ACTIVATIONS
 from .positional_embeddings import RotaryEmbedding, apply_rotary_pos_emb_torch, apply_rotary_pos_emb, \
     apply_rotary_pos_emb_index_torch, apply_rotary_pos_emb_index
+from .gau import GatedAttentionUnit
 
 # flags required to enable jit fusion kernels
 torch._C._jit_set_profiling_mode(False)
@@ -746,6 +747,38 @@ class ParallelTransformerLayerPipe(ParallelTransformerLayer):
             raise RuntimeError('Received more inputs than understood.')
 
 
+class GatedAttentionUnitPipe(GatedAttentionUnit):
+    def forward(self, inputs, **kwargs):
+        assert torch.is_tensor(inputs) or isinstance(inputs, tuple)
+        if torch.is_tensor(inputs) or len(inputs) == 1:
+            # No attention mask forwarded, search for args.attn_mask
+            if not hasattr(self, '_args'):
+                self._args = get_args()
+                if self._args.glm:
+                    assert False, "GLM doesn't have constant attention mask"
+            hidden_states, attention_mask = inputs, self._args.attn_mask
+            return super().forward(hidden_states, attention_mask, **kwargs)
+        elif len(inputs) == 2:
+            # Attention mask is an activation.
+            hidden_states, attention_mask = inputs[0], inputs[1]
+            return super().forward(*inputs, **kwargs), attention_mask
+        elif len(inputs) == 3:
+            if not hasattr(self, '_args'):
+                self._args = get_args()
+            if (
+                    self._args.position_embedding_type
+                    in [PositionEmbeddingType.rotary, PositionEmbeddingType.alibi]
+                    and self._args.glm
+            ):
+                hidden_states, attention_mask, position_ids = inputs[0], inputs[1], inputs[2]
+                return super().forward(hidden_states, attention_mask, **kwargs, position_ids=position_ids), \
+                       attention_mask, position_ids
+            else:
+                raise RuntimeError('Received more inputs than understood.')
+        else:
+            raise RuntimeError('Received more inputs than understood.')
+
+
 class ParallelTransformer(MegatronModule):
     """Transformer class."""
 
@@ -773,7 +806,9 @@ class ParallelTransformer(MegatronModule):
 
         # Transformer layers.
         def build_layer(layer_number):
-            return ParallelTransformerLayer(
+            layer_func = GatedAttentionUnit if args.gated_attention_unit \
+                else ParallelTransformerLayer
+            return layer_func(
                 init_method,
                 output_layer_init_method,
                 layer_number,

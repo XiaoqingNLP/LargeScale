@@ -689,6 +689,9 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
         seq_len = args.curriculum_seqlen if args.curriculum_learning else args.seq_length
         hidden_size = args.hidden_size
         num_layers = args.num_layers
+        if args.gated_attention_unit:
+            # Two GAU layers equals one conventional transformer layer in e=2ds setting
+            num_layers /= 2
         vocab_size = args.padded_vocab_size
 
         # Compute throughput.
@@ -702,6 +705,7 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
         # The factor of 4 is when used with activation check-pointing,
         # otherwise it will be 3, but for 200B model, activation check-pointing will always be on.
         checkpoint_activations_factor = 4 if args.checkpoint_activations else 3
+        # TODO: optimize FLOPS calculation according to layer type and ffn hidden size
         flops_per_iteration = (24 * checkpoint_activations_factor * batch_size * seq_len * num_layers * (hidden_size**2)) * (1. + (seq_len / (6. * hidden_size)) + (vocab_size / (16. * num_layers * hidden_size)))
         tflops = flops_per_iteration / (elapsed_time_per_iteration * args.world_size * (10**12))
 
