@@ -169,10 +169,14 @@ class GatedAttentionUnit(MegatronModule):
         # PB-Relax
         self.apply_pb_relax = args.apply_pb_relax
         self.pb_relax_alpha = args.pb_relax_alpha
+        # Sandwich-LN
+        self.apply_scale_normalization = args.sandwich_ln
 
         self.key_size = args.gated_attention_unit_key_size
 
         self.input_layernorm = LayerNorm(args.hidden_size, eps=args.layernorm_epsilon)
+        if self.apply_scale_normalization:
+            self.mlp_layernorm = LayerNorm(args.hidden_size, eps=args.layernorm_epsilon)
 
         self.dense_uv = mpu.ColumnParallelLinear(
             args.hidden_size,
@@ -296,6 +300,9 @@ class GatedAttentionUnit(MegatronModule):
 
     def final_dense(self, x, residual):
         x, x_bias = self.dense_w(x)
+
+        if self.apply_scale_normalization:
+            x = self.mlp_layernorm(x)
 
         if self.bias_dropout_fusion:
             if self.training:
