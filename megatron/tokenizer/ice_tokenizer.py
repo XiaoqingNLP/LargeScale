@@ -13,6 +13,13 @@ class _IceTokenizer(AbstractTokenizer):
         name = "IceTokenizer"
         super().__init__(name)
 
+        self.tokenizer = None
+        try:
+            from icetk import icetk
+
+            self.tokenizer = icetk
+        except ImportError:
+            pass
         self.num_tokens = 150000
         self.special_tokens = {}
         self.special_tokens_decoder = {}
@@ -46,8 +53,7 @@ class _IceTokenizer(AbstractTokenizer):
         elif idx in self.special_tokens_decoder:
             return f"[{self.special_tokens_decoder[idx]}]"
         else:
-            from icetk import icetk
-            return icetk.decode([idx])
+            return self.tokenizer.decode([idx])
 
     @property
     def vocab_size(self):
@@ -64,12 +70,10 @@ class _IceTokenizer(AbstractTokenizer):
         return self.tokenizer.decoder
 
     def tokenize(self, text):
-        assert False
-        # return self.tokenizer.encode(text)
+        return self.tokenizer.encode(text)
 
     def detokenize(self, token_ids):
-        assert False
-        # return self.tokenizer.decode(token_ids)
+        return self.tokenizer.decode(token_ids)
 
     @property
     def eod(self):
