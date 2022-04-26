@@ -138,7 +138,6 @@ class GatedAttentionUnit(MegatronModule):
         layer_number,
         self_attn_mask_type,
         layer_type=LayerType.encoder,
-        key_size=128,
     ):
         args = get_args()
 
@@ -171,8 +170,7 @@ class GatedAttentionUnit(MegatronModule):
         self.apply_pb_relax = args.apply_pb_relax
         self.pb_relax_alpha = args.pb_relax_alpha
 
-        world_size = mpu.get_tensor_model_parallel_world_size()
-        self.hidden_size_per_partition = mpu.divide(args.ffn_hidden_size, world_size)
+        self.key_size = args.gated_attention_unit_key_size
 
         self.input_layernorm = LayerNorm(args.hidden_size, eps=args.layernorm_epsilon)
 
@@ -186,7 +184,7 @@ class GatedAttentionUnit(MegatronModule):
 
         # dense_k is shared across model parallel group
         self.dense_qk = SharedLinear(
-            args.hidden_size, key_size, init_method=init_method
+            args.hidden_size, self.key_size, init_method=init_method
         )
 
         self.dense_w = mpu.RowParallelLinear(
@@ -197,19 +195,19 @@ class GatedAttentionUnit(MegatronModule):
             skip_bias_add=True,
         )
 
-        self.scale_offset_q = ScaleOffset(key_size)
-        self.scale_offset_k = ScaleOffset(key_size)
+        self.scale_offset_q = ScaleOffset(self.key_size)
+        self.scale_offset_k = ScaleOffset(self.key_size)
 
         if self.position_embedding_type == PositionEmbeddingType.rotary:
             self.rotary_emb = RotaryEmbedding(
-                key_size,
+                self.key_size,
                 base=10000,
                 precision=args.params_dtype,
                 learnable=args.learnable_rotary_embedding,
             )
 
         coeff = None
-        self.norm_factor = math.sqrt(key_size)
+        self.norm_factor = math.sqrt(self.key_size)
         if args.apply_query_key_layer_scaling:
             coeff = self.layer_number
             self.norm_factor *= coeff

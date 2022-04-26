@@ -412,6 +412,10 @@ def _add_network_size_args(parser):
     group.add_argument('--gated-attention-unit', action='store_true',
                        help='Use GatedAttention Unit'
                        )
+    group.add_argument('--gated-attention-unit-key-size', type=int,
+                       default=128,
+                       help='Gated Attention Unit key size'
+                       )
 
     group.add_argument('--kill-switch-path', type=str,
                        help='path to look for a kill switch, which if found will automatically exit the program'
