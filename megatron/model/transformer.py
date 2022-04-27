@@ -854,7 +854,7 @@ class ParallelTransformer(MegatronModule):
         return self.layers[layer_number]
 
     def _checkpointed_forward(self, hidden_states, attention_mask,
-                              encoder_output, enc_dec_attn_mask):
+                              encoder_output, enc_dec_attn_mask, position_ids):
         """Forward method with activation checkpointing."""
         def custom(start, end):
             def custom_forward(*inputs):
@@ -862,9 +862,10 @@ class ParallelTransformer(MegatronModule):
                 attention_mask = inputs[1]
                 encoder_output = inputs[2]
                 enc_dec_attn_mask = inputs[3]
+                position_ids = inputs[4]
                 for index in range(start, end):
                     layer = self._get_layer(index)
-                    x_ = layer(x_, attention_mask, encoder_output, enc_dec_attn_mask)
+                    x_ = layer(x_, attention_mask, encoder_output, enc_dec_attn_mask, position_ids=position_ids)
                 return x_
             return custom_forward
 
@@ -874,7 +875,7 @@ class ParallelTransformer(MegatronModule):
         while l < self.num_layers:
             hidden_states = mpu.checkpoint(
                 custom(l, l + self.checkpoint_num_layers),
-                hidden_states, attention_mask, encoder_output, enc_dec_attn_mask)
+                hidden_states, attention_mask, encoder_output, enc_dec_attn_mask, position_ids)
             l += self.checkpoint_num_layers
 
         return hidden_states
@@ -890,7 +891,7 @@ class ParallelTransformer(MegatronModule):
         self.input_tensor = input_tensor
 
     def forward(self, hidden_states, attention_mask, layer_past=None,
-                get_key_value=False, encoder_output=None, enc_dec_attn_mask=None):
+                get_key_value=False, encoder_output=None, enc_dec_attn_mask=None, position_ids=None):
 
         # Checks.
         if layer_past is not None:
@@ -921,7 +922,8 @@ class ParallelTransformer(MegatronModule):
             hidden_states = self._checkpointed_forward(hidden_states,
                                                        attention_mask,
                                                        encoder_output,
-                                                       enc_dec_attn_mask)
+                                                       enc_dec_attn_mask,
+                                                       position_ids)
         else:
             if get_key_value:
                 presents = []
@@ -935,7 +937,8 @@ class ParallelTransformer(MegatronModule):
                                       encoder_output=encoder_output,
                                       enc_dec_attn_mask=enc_dec_attn_mask,
                                       layer_past=past,
-                                      get_key_value=get_key_value)
+                                      get_key_value=get_key_value,
+                                      position_ids=position_ids)
                 if get_key_value:
                     hidden_states, present = hidden_states
                     presents.append(present)

@@ -384,8 +384,9 @@ class TransformerLanguageModel(MegatronModule):
         self.add_decoder = add_decoder
         self.decoder_attn_mask_type = decoder_attn_mask_type
         self.add_pooler = add_pooler
+        self.pass_position_ids = args.glm and args.position_embedding_type == PositionEmbeddingType.rotary
 
-        # Embeddings.
+         # Embeddings.
         if self.pre_process:
             self.embedding = Embedding(self.hidden_size,
                                        args.padded_vocab_size,
@@ -445,7 +446,8 @@ class TransformerLanguageModel(MegatronModule):
             encoder_output = self.encoder(encoder_input,
                                           enc_attn_mask,
                                           layer_past=layer_past,
-                                          get_key_value=get_key_value)
+                                          get_key_value=get_key_value,
+                                          position_ids=enc_position_ids if self.pass_position_ids else None)
         else:
             encoder_output = enc_hidden_states.to(encoder_input.dtype)
 
