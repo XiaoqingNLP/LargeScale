@@ -146,7 +146,6 @@ class GatedAttentionUnit(MegatronModule):
         # Assertions for simplicity
         assert args.position_embedding_type != PositionEmbeddingType.alibi
         assert args.fp32_residual_connection is False
-        assert args.sandwich_ln is False
 
         self.fp16 = args.fp16
         self.bf16 = args.bf16
