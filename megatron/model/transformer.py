@@ -26,7 +26,8 @@ from megatron.enums import AttnMaskType, LayerType, AttnType, PositionEmbeddingT
 from megatron.model.fused_layer_norm import MixedFusedLayerNorm as LayerNorm
 from megatron.model.fused_softmax import FusedScaleMaskSoftmax
 from megatron.model.fused_bias_gelu import bias_gelu_impl
-from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, deepnorm_init_method
+from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, get_deepnorm_coefficients
+from functools import partial
 
 import deepspeed
 
@@ -71,6 +72,20 @@ class ParallelMLP(MegatronModule):
         super(ParallelMLP, self).__init__()
         args = get_args()
 
+        if args.deepnorm:
+            world_size = mpu.get_tensor_model_parallel_world_size()
+            deepnorm_coeff = get_deepnorm_coefficients()
+            init_method = partial(
+                mpu.xavier_normal_tensor_parallel_,
+                gain=deepnorm_coeff.beta,
+                tp_degree=world_size,
+            )
+            output_layer_init_method = partial(
+                mpu.xavier_normal_tensor_parallel_,
+                gain=deepnorm_coeff.beta,
+                tp_degree=world_size,
+            )
+
         # Project to ffn_hidden_size
         self.dense_h_to_4h = mpu.ColumnParallelLinear(
             args.hidden_size,
@@ -79,6 +94,22 @@ class ParallelMLP(MegatronModule):
             gather_output=False,
             init_method=init_method,
             skip_bias_add=True)
+
+        if args.deepnorm and args.glu_activation:
+            import deepspeed.runtime.activation_checkpointing.checkpointing as ds_checkpointing
+            if ds_checkpointing.is_configured():
+                _get_cuda_rng_tracker = ds_checkpointing.get_cuda_rng_tracker
+            else:
+                _get_cuda_rng_tracker = mpu.get_cuda_rng_tracker
+
+            with _get_cuda_rng_tracker().fork():
+                w, v = self.dense_h_to_4h.weight.chunk(2, dim=0)
+                mpu.xavier_normal_tensor_parallel_(
+                    w, deepnorm_coeff.beta, tp_degree=world_size, partition_dim=0
+                )
+                mpu.xavier_normal_tensor_parallel_(
+                    v, deepnorm_coeff.beta, tp_degree=world_size, partition_dim=0
+                )
 
         self.bias_gelu_fusion = args.bias_gelu_fusion
         self.activation_func = F.gelu
@@ -163,10 +194,20 @@ class ParallelAttention(MegatronModule):
                 if ds_checkpointing.is_configured():
                     _get_cuda_rng_tracker = ds_checkpointing.get_cuda_rng_tracker
                 else:
-                    assert False
-                # Scale value weight with beta
+                    _get_cuda_rng_tracker = mpu.get_cuda_rng_tracker
+
+                deepnorm_coeff = get_deepnorm_coefficients()
                 with _get_cuda_rng_tracker().fork():
-                    output_layer_init_method(self.query_key_value.weight.split(projection_size, dim=-1)[-1])
+                    wq, wk, wv = self.query_key_value.weight.chunk(3, dim=0)
+                    mpu.xavier_normal_tensor_parallel_(
+                        wq, 1.0, tp_degree=world_size, partition_dim=0
+                    )
+                    mpu.xavier_normal_tensor_parallel_(
+                        wk, 1.0, tp_degree=world_size, partition_dim=0
+                    )
+                    mpu.xavier_normal_tensor_parallel_(
+                        wv, deepnorm_coeff.beta, tp_degree=world_size, partition_dim=0
+                    )
         else:
             assert attention_type == AttnType.cross_attn
             assert not args.deepnorm
@@ -206,8 +247,15 @@ class ParallelAttention(MegatronModule):
             projection_size,
             args.hidden_size,
             input_is_parallel=True,
-            init_method=output_layer_init_method,
-            skip_bias_add=True)
+            init_method=partial(
+                mpu.xavier_normal_tensor_parallel_,
+                gain=deepnorm_coeff.beta,
+                tp_degree=world_size
+            )
+            if args.deepnorm
+            else output_layer_init_method,
+            skip_bias_add=True,
+        )
 
         if deepspeed.checkpointing.is_configured():
             global get_cuda_rng_tracker, checkpoint
@@ -491,7 +539,7 @@ class ParallelTransformerLayer(MegatronModule):
         self.fp32_residual_connection = args.fp32_residual_connection
 
         self.deepnorm = args.deepnorm
-        self.deepnorm_alpha = (2 * args.num_layers) ** 0.5
+        self.deepnorm_coeff = get_deepnorm_coefficients()
 
         # Layernorm on the input data.
         self.input_layernorm = LayerNorm(
@@ -500,10 +548,8 @@ class ParallelTransformerLayer(MegatronModule):
 
         # Self attention.
         self.self_attention = ParallelAttention(
-            deepnorm_init_method(args.num_layers, gain=1.0)
-            if self.deepnorm else init_method,
-            deepnorm_init_method(args.num_layers)
-            if self.deepnorm else output_layer_init_method,
+            init_method,
+            output_layer_init_method,
             layer_number,
             attention_type=AttnType.self_attn,
             attn_mask_type=self_attn_mask_type)
@@ -527,10 +573,7 @@ class ParallelTransformerLayer(MegatronModule):
                 eps=args.layernorm_epsilon)
 
         # MLP
-        self.mlp = ParallelMLP(deepnorm_init_method(args.num_layers)
-                                   if self.deepnorm else init_method,
-                               deepnorm_init_method(args.num_layers)
-                                   if self.deepnorm else output_layer_init_method)
+        self.mlp = ParallelMLP(init_method, output_layer_init_method)
 
         # Alibi
         if args.position_embedding_type == PositionEmbeddingType.alibi:
@@ -600,7 +643,7 @@ class ParallelTransformerLayer(MegatronModule):
             layernorm_input = bias_dropout_add_func(
                 attention_output,
                 attention_bias.expand_as(residual),
-                (residual * self.deepnorm_alpha) if self.deepnorm else residual,
+                (residual * self.deepnorm_coeff.alpha) if self.deepnorm else residual,
                 self.hidden_dropout)
 
         # Layer norm post the self attention.
@@ -645,7 +688,7 @@ class ParallelTransformerLayer(MegatronModule):
             output = bias_dropout_add_func(
                 mlp_output,
                 mlp_bias.expand_as(residual),
-                (residual * self.deepnorm_alpha) if self.deepnorm else residual,
+                (residual * self.deepnorm_coeff.alpha) if self.deepnorm else residual,
                 self.hidden_dropout)
 
         if get_key_value:

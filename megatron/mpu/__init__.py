@@ -49,6 +49,7 @@ from .layers import VocabParallelEmbedding
 from .layers import (set_tensor_model_parallel_attributes,
                      set_defaults_if_not_set_tensor_model_parallel_attributes,
                      copy_tensor_model_parallel_attributes)
+from .layers import xavier_normal_tensor_parallel_
                      
 from .mappings import copy_to_tensor_model_parallel_region
 from .mappings import gather_from_tensor_model_parallel_region

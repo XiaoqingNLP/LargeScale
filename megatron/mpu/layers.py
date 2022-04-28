@@ -153,6 +153,21 @@ def xavier_uniform_tensor_parallel_(tensor, gain=1., tp_degree=1):
     return torch.nn.init._no_grad_uniform_(tensor, -a, a)
 
 
+def xavier_normal_tensor_parallel_(tensor, gain=1., tp_degree=1, partition_dim=None):
+    assert len(tensor.shape) == 2
+    if partition_dim is None:
+        partition_dim = tensor.partition_dim
+    fan_in, fan_out = tensor.shape
+    if partition_dim == 0:
+        fan_in *= tp_degree
+    else:
+        fan_out *= tp_degree
+
+    std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
+
+    return torch.nn.init._no_grad_normal_(tensor, 0, std)
+
+
 class VocabParallelEmbedding(torch.nn.Module):
     """Embedding parallelized in the vocabulary dimension.
 
@@ -198,6 +213,9 @@ class VocabParallelEmbedding(torch.nn.Module):
             # for BNB we ignore the passed init_method and use torch.nn.init.xavier_uniform_
             # modified to calculate std on the unpartitioned embedding
             init_method = partial(xavier_uniform_tensor_parallel_, tp_degree=self.tensor_model_parallel_size)
+
+        if args.deepnorm:
+            init_method = partial(xavier_normal_tensor_parallel_, tp_degree=self.tensor_model_parallel_size)
 
         if args.use_cpu_initialization:
             self.weight = Parameter(torch.empty(

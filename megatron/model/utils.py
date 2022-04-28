@@ -17,6 +17,7 @@
 
 import math
 from functools import wraps
+from collections import namedtuple
 
 import torch
 
@@ -38,6 +39,26 @@ def scaled_init_method_normal(sigma, num_layers):
         return torch.nn.init.normal_(tensor, mean=0.0, std=std)
 
     return init_
+
+
+DeepNormCoefficients = namedtuple("DeepNormCoefficients", ["alpha", "beta"])
+
+def get_deepnorm_coefficients():
+    """
+        DeepNorm coefficients from : https://kexue.fm/archives/8978
+    """
+    args = get_args()
+
+    num_layers = args.num_layers
+
+    if args.optimizer == 'sgd':
+        return DeepNormCoefficients(alpha=(2 * num_layers) ** 0.25, beta=(2 * num_layers) ** -0.25)
+    elif args.optimizer == 'adam':
+        return DeepNormCoefficients(alpha=(2 * num_layers) ** 0.5, beta=(2 * num_layers) ** -0.5)
+    elif args.optimizer == 'lamb':
+        return DeepNormCoefficients(alpha=1., beta=(2 * num_layers) ** -0.5)
+    else:
+        raise NotImplementedError
 
 
 def deepnorm_init_method(num_layers, gain=None):
