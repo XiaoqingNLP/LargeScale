@@ -542,7 +542,7 @@ def train_step(forward_step_func, data_iterator,
 def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                  loss_scale, report_memory_flag, skipped_iter,
                  grad_norm, params_norm, num_zeros_in_grad,
-                 model_update, model=None):
+                 model_update=None, model=None):
     """Log training information such as losses, timing, ...."""
     args = get_args()
     timers = get_timers()
