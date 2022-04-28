@@ -61,6 +61,16 @@ def get_tasks_args(parser):
                         'logic type")
     group.add_argument('--faiss-topk-retrievals', type=int, default=100,
                        help='Number of blocks to use as top-k during retrieval')
+    # SuperGLUE
+    group.add_argument('--few-superglue', action='store_true')
+    group.add_argument('--multi-token', action='store_true', help='Use multi token for cloze evaluation')
+    group.add_argument('--pattern-id', type=int, default=0)
+    group.add_argument('--loss-func', type=str, choices=["cross_entropy", "hinge", "generative", "mix"],
+                       default="cross_entropy")
+    group.add_argument('--eval-valid', action='store_true', help="Whether evaluate on the valid set")
+    group.add_argument('--wsc-negative', action='store_true')
+
+    group.add_argument("--length-penalty", type=float, default=0.0)
 
     return parser
 
@@ -75,7 +85,12 @@ if __name__ == '__main__':
         print("Interleaved pipeline schedule is not yet supported for downstream tasks.")
         exit()
 
-    if args.task == 'RACE':
+    from tasks.superglue.dataset import PROCESSORS
+
+    superglue_tasks = list(PROCESSORS.keys())
+    if args.task.lower() in superglue_tasks:
+        from superglue.finetune import main
+    elif args.task == 'RACE':
         from race.finetune import main
     elif args.task in ['MNLI', 'QQP']:
         from glue.finetune import main

@@ -22,9 +22,9 @@ from collections import defaultdict
 from typing import Tuple, List, Union, Dict
 import numpy as np
 
-from tasks.data_utils import InputExample, num_special_tokens_to_add, build_input_from_ids, build_sample, \
+from tasks.superglue.data_utils import InputExample, num_special_tokens_to_add, build_input_from_ids, build_sample, \
     build_decoder_input, build_decoder_sample
-from utils import print_rank_0
+from megatron.utils import print_rank_0
 
 FilledPattern = Tuple[List[Union[str, Tuple[str, bool]]], List[Union[str, Tuple[str, bool]]]]
 
@@ -82,14 +82,14 @@ class PVP(ABC):
         return 0
 
     @property
-    def mask(self) -> str:
+    def mask(self) -> int:
         """Return the underlying LM's mask token"""
-        return self.tokenizer.get_command('MASK').Id
+        return self.tokenizer.get_special_token('MASK')
 
     @property
     def mask_id(self) -> int:
         """Return the underlying LM's mask id"""
-        return self.tokenizer.get_command('MASK').Id
+        return self.tokenizer.get_special_token('MASK')
 
     @property
     def max_num_verbalizers(self) -> int:
@@ -180,13 +180,13 @@ class PVP(ABC):
         raw_parts_a, raw_parts_b = self.get_parts(example)
 
         raw_parts_a = [x if isinstance(x, tuple) else (x, False) for x in raw_parts_a]
-        prompt_id = tokenizer.num_tokens
+        prompt_id = tokenizer.vocab_size
 
         def encode_input(raw_parts):
             parts = []
             for x, s in raw_parts:
                 if isinstance(x, str):
-                    x = tokenizer.EncodeAsIds(x)
+                    x = tokenizer.tokenize(x)
                 elif isinstance(x, int):
                     x = [prompt_id] * x
                 else:
@@ -230,7 +230,7 @@ class PVP(ABC):
                     for idx, answer in enumerate(answers):
                         this_parts_a, this_parts_b = copy.deepcopy(parts_a), copy.deepcopy(parts_b)
                         answer_ids = get_verbalization_ids(answer, tokenizer, force_single_token=False)
-                        answer_ids = answer_ids + [tokenizer.get_command('eop').Id]
+                        answer_ids = answer_ids + [tokenizer.get_special_token('eop')]
                         self.num_truncated += self.truncate(this_parts_a, this_parts_b, answer_ids,
                                                             max_length=self.max_seq_length)
                         tokens_a = [token_id for part, _ in this_parts_a for token_id in part]
@@ -282,7 +282,7 @@ class PVP(ABC):
                 ids_list, positions_list, mask_list, target_list, logit_mask_list = [], [], [], [], []
                 for answer in answers:
                     answer_ids = get_verbalization_ids(answer, tokenizer, force_single_token=False)
-                    answer_ids = answer_ids + [tokenizer.get_command('eop').Id]
+                    answer_ids = answer_ids + [tokenizer.get_special_token('eop')]
                     answer_ids = answer_ids[:self.max_dec_seq_length]
                     data = build_decoder_input(ids, answer_ids, self.max_seq_length, self.max_dec_seq_length, tokenizer)
                     dec_ids, _, _, dec_position_ids, _, dec_target_ids, dec_loss_masks = data
@@ -432,13 +432,13 @@ class CopaPVP(PVP):
     def mask(self) -> str:
         """Return the underlying LM's mask token"""
         mask_token = 'MASK'
-        return self.tokenizer.get_command(mask_token).Id
+        return self.tokenizer.get_special_token(mask_token)
 
     @property
     def mask_id(self) -> int:
         """Return the underlying LM's mask id"""
         mask_token = 'MASK'
-        return self.tokenizer.get_command(mask_token).Id
+        return self.tokenizer.get_special_token(mask_token)
 
     def get_answers(self, example: InputExample):
         choice1 = " " + self.remove_final_punc(self.lowercase_first(example.meta['choice1']))
@@ -497,14 +497,14 @@ class CopaPVP(PVP):
         answer = " because" if question == 'cause' else " so"
         answer_ids = [get_verbalization_ids(answer, tokenizer, force_single_token=True)]
         if self.is_multi_token:
-            answer_ids.append(tokenizer.get_command('eop').Id)
+            answer_ids.append(tokenizer.get_special_token('eop'))
 
         ids_list, positions_list, sep_list, mask_list, target_list = [], [], [], [], []
 
         for choice in [choice1, choice2]:
             parts = ['"', choice1[1:], '" or "', choice2[1:], '"?', premise, [self.mask], choice]
             parts = [x if isinstance(x, tuple) else (x, False) for x in parts]
-            parts = [(tokenizer.EncodeAsIds(x).tokenization if isinstance(x, str) else x, s) for x, s in parts if
+            parts = [(tokenizer.tokenize(x) if isinstance(x, str) else x, s) for x, s in parts if
                      x]
             self.num_truncated += self.truncate(parts, None, answer_ids, max_length=self.max_seq_length)
             tokens_a = [token_id for part, _ in parts for token_id in part]
@@ -595,7 +595,7 @@ class WscPVP(PVP):
             assert not labeled, "'labeled' can only be set to true if 'priming' is also set to true"
 
         tokenizer = self.tokenizer
-        prompt_id = tokenizer.num_tokens
+        prompt_id = tokenizer.vocab_size
         raw_parts_a, raw_parts_b = self.get_parts(example)
 
         raw_parts_a = [x if isinstance(x, tuple) else (x, False) for x in raw_parts_a]
@@ -604,7 +604,7 @@ class WscPVP(PVP):
             parts = []
             for x, s in raw_parts:
                 if isinstance(x, str):
-                    x = tokenizer.EncodeAsIds(x)
+                    x = tokenizer.tokenize(x)
                 elif isinstance(x, int):
                     x = [prompt_id] * x
                 else:
@@ -621,7 +621,7 @@ class WscPVP(PVP):
             parts_b = encode_input(raw_parts_b)
         answer = self.get_answers(example)[0]
         answer_ids = get_verbalization_ids(answer, tokenizer, force_single_token=False)
-        answer_ids = answer_ids + [tokenizer.get_command('eop').Id]
+        answer_ids = answer_ids + [tokenizer.get_special_token('eop')]
         self.num_truncated += self.truncate(parts_a, parts_b, answer_ids, max_length=self.max_seq_length)
         tokens_a = [token_id for part, _ in parts_a for token_id in part]
         tokens_b = [token_id for part, _ in parts_b for token_id in part] if parts_b else None
@@ -1379,11 +1379,11 @@ def get_verbalization_ids(word: str, tokenizer, force_single_token: bool) -> Uni
     """
     if force_single_token:
         verbalization_id = tokenizer.TokenToId(word)
-        assert verbalization_id not in tokenizer.command_id_map, \
+        assert verbalization_id not in tokenizer.special_tokens_decoder, \
             f'Verbalization {word} is mapped to a special token {tokenizer.IdToToken(verbalization_id)}'
         return verbalization_id
     else:
-        ids = tokenizer.EncodeAsIds(word).tokenization
+        ids = tokenizer.tokenize(word)
         return ids
 
 

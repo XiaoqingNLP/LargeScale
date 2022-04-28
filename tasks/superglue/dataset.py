@@ -29,12 +29,12 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 
-from tasks.data_utils import InputExample
-from utils import print_rank_0
+from tasks.superglue.data_utils import InputExample
+from megatron import print_rank_0
 from tasks.superglue.pvp import PVPS
-from tasks.data_utils import build_input_from_ids, build_sample, num_special_tokens_to_add
+from tasks.superglue.data_utils import build_input_from_ids, build_sample, num_special_tokens_to_add
 from collections import defaultdict
-from data_utils.corpora import punctuation_standardization
+from tasks.superglue.data_utils import punctuation_standardization
 
 TRAIN_SET = "train"
 DEV_SET = "dev"
@@ -193,8 +193,8 @@ class DataProcessor(ABC):
 
     def encode(self, example: InputExample, tokenizer, seq_length, args):
         text_a, text_b = self.get_classifier_input(example, tokenizer)
-        tokens_a = tokenizer.EncodeAsIds(text_a).tokenization
-        tokens_b = tokenizer.EncodeAsIds(text_b).tokenization
+        tokens_a = tokenizer.tokenize(text_a)
+        tokens_b = tokenizer.tokenize(text_b)
         num_special_tokens = num_special_tokens_to_add(tokens_a, tokens_b, None, add_cls=True, add_sep=True,
                                                        add_piece=False)
         if len(tokens_a) + len(tokens_b) + num_special_tokens > seq_length:
@@ -481,10 +481,10 @@ class CopaProcessor(SuperGLUEProcessor):
         question = example.meta['question']
         joiner = 'because' if question == 'cause' else 'so'
         text_a = punctuation_standardization(example.text_a) + " " + joiner
-        tokens_a = tokenizer.EncodeAsIds(text_a).tokenization
+        tokens_a = tokenizer.tokenize(text_a)
         for choice in [example.meta["choice1"], example.meta["choice2"]]:
             choice = punctuation_standardization(choice)
-            tokens_b = tokenizer.EncodeAsIds(choice).tokenization
+            tokens_b = tokenizer.tokenize(choice)
             num_special_tokens = num_special_tokens_to_add(tokens_a, tokens_b, None, add_cls=True, add_sep=True,
                                                            add_piece=False)
             if len(tokens_a) + len(tokens_b) + num_special_tokens > seq_length:
@@ -698,10 +698,10 @@ class RecordProcessor(SuperGLUEProcessor):
             ids_list, types_list, paddings_list = [], [], []
         else:
             ids_list, positions_list, sep_list = [], [], []
-        tokens_a = tokenizer.EncodeAsIds(example.text_a).tokenization
-        tokens_b = tokenizer.EncodeAsIds(example.text_b).tokenization if example.text_b else None
+        tokens_a = tokenizer.tokenize(example.text_a)
+        tokens_b = tokenizer.tokenize(example.text_b) if example.text_b else None
         for answer in example.meta["candidates"]:
-            answer_ids = tokenizer.EncodeAsIds(answer).tokenization
+            answer_ids = tokenizer.tokenize(answer)
             total_length = len(tokens_a) + len(tokens_b) + len(answer_ids)
             total_length += num_special_tokens_to_add(tokens_a, tokens_b + answer_ids, None, add_cls=True, add_sep=True,
                                                       add_piece=False)

@@ -7,7 +7,7 @@ from __future__ import print_function
 from collections import Counter
 import string
 import re
-from tasks.data_utils import InputExample
+from tasks.superglue.data_utils import InputExample
 from typing import List
 import functools
 from collections import defaultdict
