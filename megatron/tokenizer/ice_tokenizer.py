@@ -21,10 +21,11 @@ class _IceTokenizer(AbstractTokenizer):
         except ImportError:
             pass
         self.num_tokens = 150000
-        self.special_tokens = {}
-        self.special_tokens_decoder = {}
         self.set_special_tokens(['MASK', 'gMASK', 'sMASK', 'eod', 'sop', 'eop', 'ENC', 'dBLOCK'])
         self.sentence_end_decoder = {20007: '.', 20031: '？', 20035: '！', 20027: '；', 20012: ':', 83823: '。', 145670: '…'}
+
+        self.special_tokens['eos'] = 20002
+        self.special_tokens_decoder[20002] = '</s>'
 
     def set_special_tokens(self, special_tokens):
         """Add a list of additional tokens to the encoder.
@@ -54,6 +55,14 @@ class _IceTokenizer(AbstractTokenizer):
             return f"[{self.special_tokens_decoder[idx]}]"
         else:
             return self.tokenizer.decode([idx])
+
+    def TokenToId(self, token):
+        if token == '[pad]':
+            return 0
+        elif token in self.special_tokens:
+            return self.special_tokens[token]
+        else:
+            return self.tokenizer.encode(token)[0]
 
     @property
     def vocab_size(self):
