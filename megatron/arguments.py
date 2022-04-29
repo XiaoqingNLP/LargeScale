@@ -566,7 +566,7 @@ def _add_training_args(parser):
                        help='Disable bias and dropout fusion.',
                        dest='bias_dropout_fusion')
     group.add_argument('--optimizer', type=str, default='adam',
-                       choices=['adam', 'sgd'],
+                       choices=['adam', 'sgd', 'lamb'],
                        help='Optimizer function')
     group.add_argument('--use-bnb-optimizer', action='store_true',
                        help='Use bitsandbytes optimizer for efficient training,'

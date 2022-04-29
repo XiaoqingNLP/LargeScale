@@ -15,6 +15,7 @@
 
 from apex.optimizers import FusedAdam as Adam
 from apex.optimizers import FusedSGD as SGD
+from apex.optimizers import FusedLAMB as LAMB
 
 from megatron import get_args
 from megatron.model.fused_layer_norm import MixedFusedLayerNorm as LayerNorm
@@ -79,6 +80,12 @@ def get_megatron_optimizer(model):
                                    weight_decay=args.weight_decay,
                                    betas=(args.adam_beta1, args.adam_beta2),
                                    eps=args.adam_eps)
+    elif args.optimizer == 'lamb':
+        optimizer = LAMB(param_groups,
+                         lr=args.lr,
+                         weight_decay=args.weight_decay,
+                         betas=(args.adam_beta1, args.adam_beta2),
+                         eps=args.adam_eps)
     elif args.optimizer == 'sgd':
         optimizer = SGD(param_groups,
                         lr=args.lr,
