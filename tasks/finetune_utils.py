@@ -112,20 +112,22 @@ def _build_infinite_size_dataloader(dataloader):
             iterator = dataloader.__iter__()
 
 
-def _build_train_valid_dataloaders(train_dataset, valid_dataset):
+def _build_train_valid_dataloaders(train_dataset, valid_dataset, build_data_loader_fn=None):
     """Traing and validation dataloaders."""
     args = get_args()
 
+    if build_data_loader_fn is None:
+        build_data_loader_fn = build_data_loader
     print_rank_0('building train and validation dataloaders ...')
     # Training dataset.
-    train_dataloader = build_data_loader(train_dataset, args.micro_batch_size,
+    train_dataloader = build_data_loader_fn(train_dataset, args.micro_batch_size,
                                          args.num_workers, not args.keep_last)
     # Set the training iterations.
     args.train_iters_per_epoch = len(train_dataloader)
     args.train_iters = args.epochs * args.train_iters_per_epoch
     # Validation dataset. For this dataset, we do not need to set up
     # shuffling so we can just use a simple infinite loop.
-    valid_dataloader_ = build_data_loader(valid_dataset, args.micro_batch_size,
+    valid_dataloader_ = build_data_loader_fn(valid_dataset, args.micro_batch_size,
                                           args.num_workers, not args.keep_last)
     valid_dataloader = _build_infinite_size_dataloader(valid_dataloader_)
 
@@ -231,7 +233,7 @@ def _train(model, optimizer, lr_scheduler, forward_step,
 
 def finetune(train_valid_datasets_provider, model_provider,
              forward_step=_cross_entropy_forward_step,
-             end_of_epoch_callback_provider=None):
+             end_of_epoch_callback_provider=None, build_data_loader_fn=None):
     """Main finetune function used across all tasks."""
     args = get_args()
     timers = get_timers()
@@ -244,7 +246,7 @@ def finetune(train_valid_datasets_provider, model_provider,
     if args.epochs > 0:
         train_dataset, valid_dataset = train_valid_datasets_provider()
         train_dataloader, valid_dataloader = _build_train_valid_dataloaders(
-            train_dataset, valid_dataset)
+            train_dataset, valid_dataset, build_data_loader_fn=build_data_loader_fn)
     else:
         args.train_iters = 0
     timers('train/valid/test dataset/dataloder').stop()

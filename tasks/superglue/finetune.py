@@ -27,6 +27,7 @@ from tasks.superglue.dataset import MULTI_CHOICE_DATASETS
 from tasks.superglue.evaluate import qa_exact_match, qa_f1, multirc_em
 from tasks.superglue.pvp import PVPS
 from tasks.superglue.eval_utils import accuracy_metric, f1_macro_metric, f1_metric, accuracy_func_provider
+from tasks.superglue.data_utils import build_data_loader
 from pretrain_glm import model_provider as glm_model_provider
 from pretrain_glm import process_data as process_batch_lm
 from glm.model import GLMForSingleTokenCloze, GLMForMultiTokenClozeFast, GLMForMultiTokenCloze
@@ -374,9 +375,10 @@ def main():
                                   num_prompt_tokens=args.num_prompt_tokens)
 
     if args.task.lower() in ['wsc', 'squad'] and args.cloze_eval and not args.wsc_negative:
-        finetune(train_valid_datasets_provider, partial(model_provider),
+        finetune(train_valid_datasets_provider, partial(model_provider, model_type='generation'),
                  forward_step=forward_step_lm,
-                 end_of_epoch_callback_provider=metrics_func_provider)
+                 end_of_epoch_callback_provider=metrics_func_provider,
+                 build_data_loader_fn=build_data_loader)
     else:
         if args.cloze_eval:
             multi_token = pvp.is_multi_token
@@ -386,4 +388,5 @@ def main():
 
         finetune(train_valid_datasets_provider, model_provider,
                  forward_step=finetune_forward_step,
-                 end_of_epoch_callback_provider=metrics_func_provider)
+                 end_of_epoch_callback_provider=metrics_func_provider,
+                 build_data_loader_fn=build_data_loader)
