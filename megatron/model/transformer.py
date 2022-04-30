@@ -32,8 +32,9 @@ from functools import partial
 import deepspeed
 
 from .glu_activations import GLU_ACTIVATIONS
-from .positional_embeddings import RotaryEmbedding, apply_rotary_pos_emb_torch, apply_rotary_pos_emb, \
-    apply_rotary_pos_emb_index_torch, apply_rotary_pos_emb_index
+from .positional_embeddings import RotaryEmbedding
+from .positional_embeddings import apply_rotary_pos_emb_torch, apply_rotary_pos_emb, apply_rotary_pos_emb_fused, \
+    apply_rotary_pos_emb_index_torch, apply_rotary_pos_emb_index, apply_rotary_pos_emb_index_fused
 from .gau import GatedAttentionUnit
 
 # flags required to enable jit fusion kernels
@@ -181,6 +182,8 @@ class ParallelAttention(MegatronModule):
             projection_size, args.num_attention_heads)
         self.num_attention_heads_per_partition = mpu.divide(
             args.num_attention_heads, world_size)
+
+        self.apply_rotary_positional_embedding_kernel = args.apply_rotary_positional_embedding_kernel
 
         # Strided linear layer.
         if attention_type == AttnType.self_attn:
@@ -367,14 +370,25 @@ class ParallelAttention(MegatronModule):
         # Rotary embeddings
         if self.position_embedding_type == PositionEmbeddingType.rotary:
             if position_ids is not None:
-                apply_rotary_fn = apply_rotary_pos_emb_index_torch if self.bf16 \
+                apply_rotary_fn = (
+                    apply_rotary_pos_emb_index_fused
+                    if self.apply_rotary_positional_embedding_kernel
+                    else apply_rotary_pos_emb_index_torch
+                    if self.bf16
                     else apply_rotary_pos_emb_index
+                )
                 # [b, sq] -> [sq, b]
                 position_ids = position_ids.transpose(0, 1)
                 cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
                 query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
             else:
-                apply_rotary_fn = apply_rotary_pos_emb_torch if self.bf16 else apply_rotary_pos_emb
+                apply_rotary_fn = (
+                    apply_rotary_pos_emb_fused
+                    if self.apply_rotary_positional_embedding_kernel
+                    else apply_rotary_pos_emb_torch
+                    if self.bf16
+                    else apply_rotary_pos_emb
+                )
 
                 seq_len = key_layer.shape[0]
                 offset = 0

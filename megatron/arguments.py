@@ -321,6 +321,9 @@ def parse_args(extra_args_provider=None, defaults={},
     if args.deepnorm:
         args.apply_residual_connection_post_layernorm = True
 
+    if args.apply_rotary_positional_embedding_kernel:
+        assert not args.learnable_rotary_embedding, 'rope kernel only support unlearnable rope'
+
     _print_args(args)
     return args
 
@@ -591,6 +594,8 @@ def _add_training_args(parser):
                        help="If set to True, the program will abort if the constraints for loading a fused kernel aren't met")
     group.add_argument('--pp-partition-method', type=str, default=None,
                        help="Use to override the pipeline stages partitioning method. e.g., 'type:transformer|embedding'")
+    group.add_argument('--apply-rotary-positional-embedding-kernel', action='store_true',
+                       help='Use custom cuda kernel for rotary positional embedding.')
 
     return parser
 
