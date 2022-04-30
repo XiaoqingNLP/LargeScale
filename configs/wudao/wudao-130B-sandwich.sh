@@ -6,7 +6,7 @@ NAME="wudao-130B-sandwich"
 
 EXP_NAME=${NAME}-${TIMESTAMP}
 CHECKPOINT_PATH="/thudm/LargeScale/checkpoints/${NAME}"
-TENSORBOARD_PATH="runs/wudao/${EXP_NAME}"
+TENSORBOARD_PATH="runs/wudao/${NAME}"
 
 config_json="./logs/${EXP_NAME}/ds_config.json"
 
@@ -28,7 +28,7 @@ SAVE_INTERVAL=250
 TRAIN_TOKENS=450000000000 # 450B tokens
 TRAIN_SAMPLES=$((TRAIN_TOKENS / SEQ_LEN))
 LR_DECAY_SAMPLES=$((TRAIN_SAMPLES * 90 / 100))  # Decay for the first 90% tokens then continue at fixed --min-lr
-LR_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 1 / 100))  # 1% warmup
+LR_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 2 / 100))  # 2% warmup
 BATCH_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 2 / 100))  # 2% warmup
 
 ZERO_STAGE=1
@@ -74,6 +74,7 @@ GLM_ARGS="
        --min-gmask-ratio 0.2 \
        --aggregated-samples-per-sequence 4 \
        --no-query-key-layer-scaling \
+       --sandwich-ln \
        --apply-pb-relax \
        --pb-relax-alpha 128 \
        --position-embedding-type rotary \
@@ -114,7 +115,6 @@ gpt_options=" \
        --checkpoint-activations \
        --init-method-std 0.0052 \
        --shrink-embedding-gradient-alpha 0.1 \
-       --sandwich-ln \
        --fp16 \
        $OPTIMIZER_ARGS \
        $DEEPSPEED_ARGS \
