@@ -731,6 +731,8 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
 
         log_string = ' iteration {:8d}/{:8d} |'.format(
             iteration, args.train_iters)
+        log_string += ' iterated samples: {:12d} |'.format(
+            args.iterated_train_samples)
         log_string += ' consumed samples: {:12d} |'.format(
             args.consumed_train_samples)
         log_string += ' consumed tokens: {:12d} |'.format(
@@ -844,7 +846,12 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
             iteration_for_skipping = args.iteration
             while iteration_for_skipping + 1 <= end:
                 try:
-                    _ = next(train_data_iterator)
+                    for i in range(get_num_microbatches()):
+                        _ = next(train_data_iterator)
+                    new_samples = mpu.get_data_parallel_world_size() * \
+                                  args.micro_batch_size * \
+                                  get_num_microbatches()
+                    args.iterated_train_samples += new_samples
                 except TypeError:
                     pass
                 iteration_for_skipping += 1
@@ -879,6 +886,7 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
                                        args.micro_batch_size * \
                                        get_num_microbatches()
         args.consumed_train_samples += new_samples
+        args.iterated_train_samples += new_samples
         if args.curriculum_learning:
             args.consumed_train_tokens += new_samples * args.curriculum_seqlen
         else:
@@ -1145,7 +1153,7 @@ def build_train_valid_test_data_iterators(
         # train_dataloader is a single item while valid_dataloaders
         # and test_dataloaders are arrays
         train_dataloader = build_pretraining_data_loader(
-            train_ds[0], args.consumed_train_samples)
+            train_ds[0], args.iterated_train_samples)
 
         # We collapse None and empty list as both should mean we don't run validation
         # args.consumed_valid_samples accumulates the sum of valid steps for every dataset, which are all equal

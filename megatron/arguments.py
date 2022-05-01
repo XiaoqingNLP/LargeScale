@@ -200,6 +200,7 @@ def parse_args(extra_args_provider=None, defaults={},
 
     # Consumed tokens.
     args.consumed_train_samples = 0
+    args.iterated_train_samples = 0  # consider data skipping logic
     args.consumed_valid_samples = 0
     args.consumed_train_tokens = 0
     args.gigaflos_no_embeds = 0

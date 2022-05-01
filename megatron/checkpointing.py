@@ -358,6 +358,7 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
 
     # Check arguments.
     assert args.consumed_train_samples == 0
+    assert args.iterated_train_samples == 0
     assert args.consumed_valid_samples == 0
     if 'args' in state_dict:
         checkpoint_args = state_dict['args']
@@ -365,6 +366,8 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
         args.consumed_train_samples = getattr(checkpoint_args,
                                               'consumed_train_samples', 0)
         update_num_microbatches(consumed_samples=args.consumed_train_samples)
+        args.iterated_train_samples = getattr(checkpoint_args,
+                                              'iterated_train_samples', args.consumed_train_samples)
         args.consumed_valid_samples = getattr(checkpoint_args,
                                               'consumed_valid_samples', 0)
         args.gigaflos_no_embeds = getattr(checkpoint_args,
