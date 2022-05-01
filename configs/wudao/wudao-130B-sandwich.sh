@@ -28,8 +28,8 @@ SAVE_INTERVAL=250
 TRAIN_TOKENS=450000000000 # 450B tokens
 TRAIN_SAMPLES=$((TRAIN_TOKENS / SEQ_LEN))
 LR_DECAY_SAMPLES=$((TRAIN_SAMPLES * 90 / 100))  # Decay for the first 90% tokens then continue at fixed --min-lr
-LR_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 2 / 100))  # 2% warmup
-BATCH_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 2 / 100))  # 2% warmup
+LR_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 2 / 100))  # 2.0% warmup
+BATCH_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 15 / 1000))  # 1.5% warmup
 
 ZERO_STAGE=1
 
@@ -41,7 +41,7 @@ OPTIMIZER_ARGS=" \
     --adam-beta2 0.95 \
     --adam-eps 1e-8 \
     --lr 7e-5 \
-    --min-lr 6e-6 \
+    --min-lr 7e-6 \
     --lr-decay-style cosine \
     --lr-decay-samples $LR_DECAY_SAMPLES \
     --lr-warmup-samples $LR_WARMUP_SAMPLES \
@@ -52,7 +52,7 @@ OPTIMIZER_ARGS=" \
 OUTPUT_ARGS=" \
     --log-interval 1 \
     --save-interval $SAVE_INTERVAL \
-    --eval-interval 100 \
+    --eval-interval 1000 \
     --eval-iters 3 \
     --tensorboard-dir $TENSORBOARD_PATH \
     --tensorboard-queue-size 5 \
@@ -81,8 +81,8 @@ GLM_ARGS="
        --ffn-hidden-size $FFN_HIDDEN \
        --glu-activation geglu \
        --no-bias-gelu-fusion \
-       --apply-rotary-positional-embedding-kernel \
     "
+#       --apply-rotary-positional-embedding-kernel \
 
 DEEPSPEED_ARGS=" \
        --deepspeed \
