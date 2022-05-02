@@ -16,6 +16,7 @@
 """Pretrain utilities."""
 
 from datetime import datetime
+import collections
 import bisect
 import math
 import sys
@@ -842,19 +843,25 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
             and args.skip_train_iteration_range[0][0] <= iteration + 1 <= args.skip_train_iteration_range[0][1]
         ):
             start, end = args.skip_train_iteration_range.popleft()
-            print_rank_0(f"Skipped iterations {start} to {end} due to --skip-train-iteration-range flag.")
+            print_rank_0(f"Skipping iterations {start} to {end} due to --skip-train-iteration-range flag.")
             iteration_for_skipping = args.iteration
             while iteration_for_skipping + 1 <= end:
+                update_num_microbatches(args.iterated_train_samples)
                 try:
-                    for i in range(get_num_microbatches()):
-                        _ = next(train_data_iterator)
-                    new_samples = mpu.get_data_parallel_world_size() * \
-                                  args.micro_batch_size * \
-                                  get_num_microbatches()
-                    args.iterated_train_samples += new_samples
+                    if mpu.get_pipeline_model_parallel_world_size() == 1 or \
+                            mpu.is_pipeline_first_stage() or mpu.is_pipeline_last_stage():
+                        for i in range(get_num_microbatches()):
+                            _ = next(train_data_iterator)
                 except TypeError:
                     pass
+                new_samples = mpu.get_data_parallel_world_size() * \
+                              args.micro_batch_size * \
+                              get_num_microbatches()
+                args.iterated_train_samples += new_samples
                 iteration_for_skipping += 1
+                if iteration_for_skipping % args.log_interval == 0:
+                    print_rank_0(f"Skipped iter {iteration_for_skipping}, num_samples = {new_samples}")
+            print_rank_0(f"Skipped iterations {start} to {end} due to --skip-train-iteration-range flag.")
             continue
 
         if found_kill_switch():
@@ -1115,6 +1122,26 @@ def build_train_valid_test_data_iterators(
             'only backward compatiblity support for iteration-based training'
         args.consumed_valid_samples = (args.iteration // args.eval_interval) * \
             args.eval_iters * args.global_batch_size
+
+    # Fast iteration skipping
+    if args.skip_train_iteration_range is not None:
+        skip_train_iteration_range_deque = collections.deque()
+        for start, end in args.skip_train_iteration_range:
+            if start == args.iteration + 1:
+                now = args.iteration
+                while now + 1 <= end:
+                    update_num_microbatches(args.iterated_train_samples)
+                    new_samples = mpu.get_data_parallel_world_size() * \
+                                  args.micro_batch_size * \
+                                  get_num_microbatches()
+                    print_rank_0(f"Skipping iter {now + 1}, samples = {new_samples}")
+                    args.iterated_train_samples += new_samples
+                    now += 1
+            else:
+                skip_train_iteration_range_deque.append([start, end])
+        args.skip_train_iteration_range = skip_train_iteration_range_deque
+        # Recover micro batch size
+        update_num_microbatches(args.consumed_train_samples)
 
     # Data loader only on rank 0 of each model parallel group.
     if mpu.get_tensor_model_parallel_rank() == 0:
