@@ -52,7 +52,7 @@ class RotaryPositionalEmbeddingFunction(torch.autograd.Function):
         cos_ = cos.contiguous()
         sin_ = sin.contiguous()
         output = rotary_positional_embedding_cuda.forward(*q.shape, q_, cos_, sin_)
-        ctx.save_for_backward(cos, sin)
+        ctx.save_for_backward(cos_, sin_)
 
         return output
 
