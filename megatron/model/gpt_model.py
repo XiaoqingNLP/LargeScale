@@ -38,7 +38,8 @@ from .transformer import ParallelTransformerLayerPipe, GatedAttentionUnitPipe
 def post_language_model_processing(lm_output, labels, logit_weights,
                                    get_key_value, parallel_output,
                                    forward_method_parallel_output,
-                                   fp16_lm_cross_entropy):
+                                   fp16_lm_cross_entropy,
+                                   use_hinge_cross_entropy_loss):
     if get_key_value:
         lm_output, presents = lm_output
 
@@ -56,11 +57,14 @@ def post_language_model_processing(lm_output, labels, logit_weights,
     if labels is None:
         return output
     else:
+        loss_func = mpu.vocab_parallel_cross_entropy
+        if use_hinge_cross_entropy_loss:
+            loss_func = mpu.vocab_parallel_hinge_cross_entropy
         if fp16_lm_cross_entropy:
             assert output.dtype == torch.half
-            loss = mpu.vocab_parallel_cross_entropy(output, labels)
+            loss = loss_func(output, labels)
         else:
-            loss = mpu.vocab_parallel_cross_entropy(output.float(), labels)
+            loss = loss_func(output.float(), labels)
         return loss
 
 
@@ -82,6 +86,7 @@ class GPTModel(MegatronModule):
         self.pre_process = pre_process
         self.post_process = post_process
         self.fp16_lm_cross_entropy = args.fp16_lm_cross_entropy
+        self.use_hinge_cross_entropy_loss = args.use_hinge_cross_entropy_loss
 
         self.language_model, self._language_model_key = get_language_model(
             num_tokentypes=num_tokentypes,
@@ -132,7 +137,8 @@ class GPTModel(MegatronModule):
                 get_key_value,
                 self.parallel_output,
                 forward_method_parallel_output,
-                self.fp16_lm_cross_entropy)
+                self.fp16_lm_cross_entropy,
+                self.use_hinge_cross_entropy_loss)
         else:
             return lm_output
 
@@ -167,7 +173,10 @@ def get_cross_entropy(is_prefix: bool):
 
         args = get_args()
 
-        losses = mpu.vocab_parallel_cross_entropy(output.contiguous().float(), labels)
+        loss_func = mpu.vocab_parallel_cross_entropy
+        if args.use_hinge_cross_entropy_loss:
+            loss_func = mpu.vocab_parallel_hinge_cross_entropy
+        losses = loss_func(output.contiguous().float(), labels)
 
         if is_prefix:
             micro_batch_size, sequence_length = loss_mask.shape

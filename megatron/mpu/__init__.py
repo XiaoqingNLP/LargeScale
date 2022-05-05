@@ -16,6 +16,7 @@
 """Model parallel utility interface."""
 
 from .cross_entropy import vocab_parallel_cross_entropy
+from .cross_entropy import vocab_parallel_hinge_cross_entropy
 
 from .data import broadcast_data
 
