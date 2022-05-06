@@ -2,7 +2,7 @@
 
 DATA_PATH="/thudm/LargeScale/data/merge"
 MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask"
-NAME="wudao-130B-sandwich"
+NAME="wudao-130B"
 
 EXP_NAME=${NAME}-${TIMESTAMP}
 CHECKPOINT_PATH="/thudm/LargeScale/checkpoints/${NAME}"
@@ -28,8 +28,8 @@ SAVE_INTERVAL=250
 TRAIN_TOKENS=450000000000 # 450B tokens
 TRAIN_SAMPLES=$((TRAIN_TOKENS / SEQ_LEN))
 LR_DECAY_SAMPLES=$((TRAIN_SAMPLES * 90 / 100))  # Decay for the first 90% tokens then continue at fixed --min-lr
-LR_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 2 / 100))  # 2.0% warmup
-BATCH_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 15 / 1000))  # 1.5% warmup
+LR_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 5 / 1000))  # 0.5% warmup
+BATCH_WARMUP_SAMPLES=$((TRAIN_SAMPLES * 25 / 1000))  # 2.5% warmup
 
 ZERO_STAGE=1
 
@@ -40,8 +40,9 @@ OPTIMIZER_ARGS=" \
     --adam-beta1 0.9 \
     --adam-beta2 0.95 \
     --adam-eps 1e-8 \
-    --lr 7e-5 \
-    --min-lr 7e-6 \
+    --lr 8e-5 \
+    --min-lr 8e-6 \
+    --override-lr-scheduler \
     --lr-decay-style cosine \
     --lr-decay-samples $LR_DECAY_SAMPLES \
     --lr-warmup-samples $LR_WARMUP_SAMPLES \
@@ -73,16 +74,12 @@ GLM_ARGS="
        --average-block-length 3 \
        --min-gmask-ratio 0.2 \
        --aggregated-samples-per-sequence 4 \
-       --no-query-key-layer-scaling \
-       --sandwich-ln \
-       --apply-pb-relax \
-       --pb-relax-alpha 128 \
+       --deepnorm \
        --position-embedding-type rotary \
        --ffn-hidden-size $FFN_HIDDEN \
        --glu-activation geglu \
        --no-bias-gelu-fusion \
     "
-#       --apply-rotary-positional-embedding-kernel \
 
 DEEPSPEED_ARGS=" \
        --deepspeed \
