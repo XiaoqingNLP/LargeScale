@@ -23,6 +23,7 @@ class GLMPreprocessor:
             min_gmask_ratio,
             relative_pos_encoding,
             no_2d_encoding,
+            aggregate_gpt_sample,
             rank,
             device_num,
     ):
@@ -45,6 +46,7 @@ class GLMPreprocessor:
         ]
         self.relative_pos_encoding = relative_pos_encoding
         self.no_2d_encoding = no_2d_encoding
+        self.aggregate_gpt_sample = aggregate_gpt_sample
         self.count = 0
         self.rank = rank
         self.device_num = device_num
@@ -255,51 +257,63 @@ class GLMPreprocessor:
                 sequences.append((tokens, targets, loss_masks, position_ids, division))
             return self._pack_samples(sequences)
         else:
-            generation_length = rng.randint(
-                int(self.min_gmask_ratio * len(input_ids)), len(input_ids)
-            )
-            division = len(input_ids) - generation_length
-            source_tokens, target_tokens = (
-                input_ids[:division],
-                input_ids[division:],
-            )
-            target_masks = np.ones(len(target_tokens), dtype=np.int)
-            tokens = np.concatenate(
-                (
-                    source_tokens,
-                    [self.gmask_id, self.sop_id],
-                    target_tokens[:-1],
+            sequences = []
+            if self.aggregate_gpt_sample:
+                assert self.max_seq_length % self.aggregated_samples_per_sequence == 0
+                assert len(input_ids) % self.aggregated_samples_per_sequence == 0
+                input_length = len(input_ids) // self.aggregated_samples_per_sequence
+                aggregated_samples_per_sequence = self.aggregated_samples_per_sequence
+            else:
+                input_length = len(input_ids)
+                aggregated_samples_per_sequence = 1
+            for i in range(aggregated_samples_per_sequence):
+                current_input_ids = input_ids[input_length * i: input_length * (i + 1)]
+                generation_length = rng.randint(
+                    int(self.min_gmask_ratio * len(current_input_ids)), len(current_input_ids)
                 )
-            )
-            targets = np.concatenate(
-                (source_tokens, [self.gmask_id], target_tokens)
-            )
-            loss_masks = np.concatenate(
-                (np.zeros(len(source_tokens) + 1, dtype=np.int), target_masks)
-            )
-            position_ids = np.arange(
-                len(source_tokens) + len(target_tokens) + 1, dtype=np.int
-            )
-            position_ids[len(source_tokens) + 1:] = len(source_tokens)
-            block_position_ids = np.concatenate(
-                (
-                    np.zeros(len(source_tokens), dtype=np.int),
-                    np.arange(len(target_tokens) + 1, dtype=np.int),
+                division = len(current_input_ids) - generation_length
+                source_tokens, target_tokens = (
+                    current_input_ids[:division],
+                    current_input_ids[division:],
                 )
-            )
-            position_ids = np.stack([position_ids, block_position_ids], axis=0)
-            division = division + 1
-            tokens, targets, loss_masks, position_ids = self.pad_batch(
-                tokens, targets, loss_masks, position_ids
-            )
-            if self.relative_pos_encoding:
-                position_ids = self._build_relative_pos_encoding(position_ids, division)
-            elif self.no_2d_encoding:
-                position_ids = np.arange(len(tokens), dtype=np.int)
-            # attention_mask = self.build_mask_matrix(division, self.max_seq_length)
-            division = np.array([division], dtype=np.int)
-            return tokens, targets, loss_masks, position_ids, division
-
+                target_masks = np.ones(len(target_tokens), dtype=np.int)
+                tokens = np.concatenate(
+                    (
+                        source_tokens,
+                        [self.gmask_id, self.sop_id],
+                        target_tokens[:-1],
+                    )
+                )
+                targets = np.concatenate(
+                    (source_tokens, [self.gmask_id], target_tokens)
+                )
+                loss_masks = np.concatenate(
+                    (np.zeros(len(source_tokens) + 1, dtype=np.int), target_masks)
+                )
+                position_ids = np.arange(
+                    len(source_tokens) + len(target_tokens) + 1, dtype=np.int
+                )
+                position_ids[len(source_tokens) + 1:] = len(source_tokens)
+                block_position_ids = np.concatenate(
+                    (
+                        np.zeros(len(source_tokens), dtype=np.int),
+                        np.arange(len(target_tokens) + 1, dtype=np.int),
+                    )
+                )
+                position_ids = np.stack([position_ids, block_position_ids], axis=0)
+                division = division + 1
+                tokens, targets, loss_masks, position_ids = self.pad_batch(
+                    tokens, targets, loss_masks, position_ids,
+                    max_seq_length=self.max_seq_length // aggregated_samples_per_sequence
+                )
+                if self.relative_pos_encoding:
+                    position_ids = self._build_relative_pos_encoding(position_ids, division)
+                elif self.no_2d_encoding:
+                    position_ids = np.arange(len(tokens), dtype=np.int)
+                # attention_mask = self.build_mask_matrix(division, self.max_seq_length)
+                division = np.array([division], dtype=np.int)
+                sequences.append((tokens, targets, loss_masks, position_ids, division))
+            return self._pack_samples(sequences)
     def _get_single_multitask_data(self, text, target):
         max_seq_length = self.max_seq_length // self.aggregated_samples_per_sequence
         if len(text) + len(target) + 2 > max_seq_length:

@@ -64,6 +64,7 @@ def build_train_valid_test_datasets(
         min_gmask_ratio=args.min_gmask_ratio,
         relative_pos_encoding=args.position_embedding_type == PositionEmbeddingType.alibi,
         no_2d_encoding=args.position_embedding_type == PositionEmbeddingType.rotary,
+        aggregate_gpt_sample=args.aggregate_gpt_sample,
         rank=0,
         device_num=1,
     )

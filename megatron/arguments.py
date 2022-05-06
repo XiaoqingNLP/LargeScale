@@ -1128,4 +1128,5 @@ def _add_glm_args(parser):
     )
     group.add_argument("--length-per-sample", type=int, default=None)
     group.add_argument("--aggregated-samples-per-sequence", type=int, default=1)
+    group.add_argument('--aggregate-gpt-sample', action='store_true')
     return parser
