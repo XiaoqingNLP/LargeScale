@@ -23,7 +23,7 @@ NHEADS=96
 LENGTH_PER_SAMPLE=2000 # sequence length per sample from BinaryDataset
 SEQ_LEN=2048 # actual length during training (pad to this)
 
-SAVE_INTERVAL=250
+SAVE_INTERVAL=100
 
 TRAIN_TOKENS=450000000000 # 450B tokens
 TRAIN_SAMPLES=$((TRAIN_TOKENS / SEQ_LEN))
