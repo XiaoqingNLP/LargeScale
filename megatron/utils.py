@@ -438,3 +438,54 @@ def found_kill_switch():
         return True
     else:
         return False
+
+
+def get_grad_norm_by_layer(model, inv_scale, norm_type=2.0):
+    language_model = model.module.module.language_model
+    grad_norm_by_layer = {}
+
+    layers = []
+    layers.append(('embedding', language_model.embedding.word_embeddings.parameters()))
+    for idx, layer in enumerate(language_model.encoder.layers):
+        layers.append((f"layer-{idx}", layer.parameters()))
+
+    for name, params in layers:
+        grads_for_norm = []
+        for param in params:
+            grad_not_none = param.grad is not None
+            is_not_shared = param_is_not_shared(param)
+            is_not_tp_duplicate = param_is_not_tensor_parallel_duplicate(param)
+            grad = param.grad.detach()
+            if grad_not_none and is_not_shared and is_not_tp_duplicate:
+                grads_for_norm.append(grad.float() * inv_scale)
+
+        # print("FUCK in calc")
+        # print(grads_for_norm)
+        norm_type = float(norm_type)
+
+        dummy_overflow_buf = torch.cuda.IntTensor([0])
+        # Use apex's multi-tensor applier for efficiency reasons.
+        # Multi-tensor applier takes a function and a list of list
+        # and performs the operation on that list all in one kernel.
+        grad_norm, _ = multi_tensor_applier(
+            amp_C.multi_tensor_l2norm,
+            dummy_overflow_buf,
+            [grads_for_norm],
+            False  # no per-parameter norm
+        )
+        # Since we will be summing across data parallel groups,
+        # we need the pow(norm-type).
+        total_norm = grad_norm ** norm_type
+        # print(name, total_norm)
+
+        # Sum across all model-parallel GPUs.
+        torch.distributed.all_reduce(total_norm,
+                                     op=torch.distributed.ReduceOp.SUM,
+                                     group=mpu.get_model_parallel_group())
+        total_norm = total_norm.item() ** (1.0 / norm_type)
+        grad_norm_by_layer[name] = total_norm
+
+    if torch.distributed.get_rank() == 0:
+        print(grad_norm_by_layer)
+
+    return grad_norm_by_layer
