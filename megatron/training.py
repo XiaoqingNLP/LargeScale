@@ -45,6 +45,7 @@ from megatron.optimizer import get_megatron_optimizer
 from megatron.initialize import initialize_megatron
 from megatron.initialize import write_args_to_tensorboard, log_restart_to_tensorboard
 from megatron.learning_rates import AnnealingLR
+from megatron.model.language_model import get_shrink_embedding_gradient_alpha
 from megatron.model.distributed import DistributedDataParallel as LocalDDP
 from megatron.utils import check_adlr_autoresume_termination, get_parameters_in_billions
 from megatron.utils import unwrap_model, found_kill_switch
@@ -622,6 +623,8 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                               args.consumed_train_samples)
             writer.add_scalar('learning-rate/learning-rate vs tokens', learning_rate,
                               args.consumed_train_tokens)
+            writer.add_scalar('learning-rate/shrink-embedding-gradient-alpha',
+                              get_shrink_embedding_gradient_alpha(iteration), iteration)
         if args.log_batch_size_to_tensorboard:
             writer.add_scalar('batch-size/batch-size', batch_size, iteration)
             writer.add_scalar('batch-size/batch-size vs samples', batch_size,
