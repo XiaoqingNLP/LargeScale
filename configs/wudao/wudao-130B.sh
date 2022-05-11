@@ -112,6 +112,7 @@ gpt_options=" \
        --checkpoint-activations \
        --init-method-std 0.0052 \
        --shrink-embedding-gradient-alpha 0.1 \
+       --shrink-embedding-gradient-steps 6000 500 \
        --fp16 \
        $OPTIMIZER_ARGS \
        $DEEPSPEED_ARGS \
