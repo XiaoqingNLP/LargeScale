@@ -93,6 +93,7 @@ class DeepSpeedCheckpoint(object):
             sd_list = [torch.load(fname, map_location=torch.device('cpu')) for fname in fname_list]
             sd = self._merge_state_dicts(sd_list)
             t_list.append(sd)
+            print(f"[TP={tp_index}, PP={pp_index}] Finish loading {fname_list}")
         return t_list   
 
     def get_final_norm_state(self, tp_index:int) -> Dict:
@@ -123,9 +124,9 @@ class DeepSpeedCheckpoint(object):
     def _build_transformer_file_map(self):
         transformer_layer_keys = self.layer_keys[1:-1]
         file_map = {}
-        layers_per_pp = len(transformer_layer_keys) // self.pp_degree
+        layers_per_pp = (len(transformer_layer_keys) + 2) // self.pp_degree
         for key_index, layer_key in enumerate(transformer_layer_keys):
-            pp_index = key_index // layers_per_pp
+            pp_index = (key_index + 1) // layers_per_pp
             layer_files = self._get_files_with_prefix(self.layer_files, layer_key)
             layer_file_partitions = self._partition_data(layer_files, self.tp_degree)
             for tp_index in range(self.tp_degree):
@@ -140,7 +141,7 @@ class DeepSpeedCheckpoint(object):
         assert len(self.mp_rank_files) % self.tp_degree == 0
         assert len(self.zero_files) % (self.pp_degree * self.tp_degree) == 0
         assert len(self.layer_keys) > 2
-        assert (len(self.layer_keys) - 2) % self.pp_degree == 0
+        assert len(self.layer_keys) % self.pp_degree == 0  # balanced pipeline partition
      
     def _get_files_with_prefix(self, all_files, prefix):
         file_list = []
