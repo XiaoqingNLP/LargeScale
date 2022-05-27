@@ -857,9 +857,12 @@ class ParallelTransformer(MegatronModule):
         self.checkpoint_num_layers = args.checkpoint_num_layers
 
         # Number of layers.
-        assert args.num_layers % mpu.get_pipeline_model_parallel_world_size() == 0, \
+        assert (args.num_layers + 2) % mpu.get_pipeline_model_parallel_world_size() == 0, \
             'num_layers must be divisible by pipeline_model_parallel_size'
-        self.num_layers = args.num_layers // mpu.get_pipeline_model_parallel_world_size()
+        self.num_layers = (args.num_layers + 2) // mpu.get_pipeline_model_parallel_world_size()
+        if mpu.get_pipeline_model_parallel_world_size() > 2 and \
+            (mpu.is_pipeline_first_stage() or mpu.is_pipeline_last_stage()):
+            self.num_layers -= 1
 
         # Transformer layers.
         def build_layer(layer_number):
