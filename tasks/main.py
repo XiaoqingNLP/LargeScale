@@ -90,6 +90,8 @@ if __name__ == '__main__':
     superglue_tasks = list(PROCESSORS.keys())
     if args.task.lower() in superglue_tasks:
         from superglue.finetune import main
+    elif args.task.lower() == 'zero-shot':
+        from zeroshot_glm.evaluate import main
     elif args.task == 'RACE':
         from race.finetune import main
     elif args.task in ['MNLI', 'QQP']:
