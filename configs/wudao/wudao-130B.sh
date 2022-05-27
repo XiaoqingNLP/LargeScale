@@ -63,9 +63,12 @@ OUTPUT_ARGS=" \
     "
 
 GLM_ARGS="
+       --tensor-model-parallel-size $TP_SIZE \
+       --pipeline-model-parallel-size $PP_SIZE \
        --num-layers $NLAYERS \
        --hidden-size $NHIDDEN \
        --num-attention-heads $NHEADS \
+       --make-vocab-size-divisible-by 768 \
        --glm \
        --gpt-prob 0.7 \
        --single-span-prob 0.02 \
@@ -91,8 +94,6 @@ DEEPSPEED_ARGS=" \
 
 gpt_options=" \
        $GLM_ARGS \
-       --tensor-model-parallel-size $TP_SIZE \
-       --pipeline-model-parallel-size $PP_SIZE \
        --pp-partition-method 'type:transformer|embedding' \
        --micro-batch-size $MICRO_BATCH_SIZE \
        --global-batch-size $GLOBAL_BATCH_SIZE \
@@ -100,7 +101,6 @@ gpt_options=" \
        --train-samples $TRAIN_SAMPLES \
        --length-per-sample $LENGTH_PER_SAMPLE \
        --seq-length $SEQ_LEN \
-       --make-vocab-size-divisible-by 768 \
        --multitask-data-path $MULTITASK_DATA_PATH \
        --multitask-ratio 0.05 \
        --data-path $DATA_PATH \
