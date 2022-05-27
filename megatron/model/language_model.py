@@ -212,7 +212,10 @@ class Embedding(MegatronModule):
 
     def get_shrink_embedding_gradient_alpha(self):
         args = get_args()
-        return get_shrink_embedding_gradient_alpha(args.iteration + 1)
+        if hasattr(args, 'iteration'):
+            return get_shrink_embedding_gradient_alpha(args.iteration + 1)
+        else:
+            return args.shrink_embedding_gradient_alpha
 
     def forward(self, input_ids, position_ids, tokentype_ids=None):
         # Embeddings.
