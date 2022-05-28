@@ -45,10 +45,11 @@ def pad_batch(tokens, targets, loss_masks, max_seq_length=None):
 
 
 class ZeroShotDataset(torch.utils.data.Dataset):
-    def __init__(self, path, max_seq_length=512):
+    def __init__(self, path, max_seq_length=2048):
         self.path = path
         self.max_seq_length = max_seq_length
         self.data = []
+        self.answer = []
 
         tokenizers = get_tokenizer()
         self.mask_id = tokenizers.get_special_token('MASK')
@@ -59,11 +60,15 @@ class ZeroShotDataset(torch.utils.data.Dataset):
         with open(os.path.join(path), 'r') as file:
             for line in file:
                 item = json.loads(line)
-                assert item['inputs'][-1] == self.sop_id
-                assert item['inputs'][-2] == self.mask_id
-                text, target = item['inputs'][:-2], item['targets']
+                # assert item['inputs'][-1] == self.sop_id
+                # assert item['inputs'][-2] == self.mask_id
+                text, target = item['inputs'], item['targets']
+                if len(text) + len(target) + 2 >= max_seq_length:
+                    text_length = max_seq_length - len(target) - 2
+                    text = text[len(text) - text_length:len(text)]
                 assert len(text) + len(target) + 2 <= max_seq_length
                 self.data.append((text, target))
+                self.answer.append(item['targets_pretokenized'].strip())
 
     def __len__(self):
         return len(self.data)
@@ -78,8 +83,9 @@ class ZeroShotDataset(torch.utils.data.Dataset):
             (np.zeros(len(text) + 1, dtype=self.dtype), np.ones(len(target) + 1, dtype=self.dtype)))
         division = len(text) + 1
         # pad batch
+        PAD = 32
         tokens, targets, loss_masks = pad_batch(
-            tokens, targets, loss_masks, self.max_seq_length)
+            tokens, targets, loss_masks, ((len(tokens) + PAD - 1) // PAD) * PAD)
         position_ids = np.arange(len(tokens), dtype=self.dtype)
 
         return {
