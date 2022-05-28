@@ -1,7 +1,8 @@
 #! /bin/bash
 
 DATA_PATH="/thudm/LargeScale/data/merge"
-MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask"
+#MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask"
+MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask_en_zh_deepstruct_100k"
 NAME="wudao-130B"
 
 EXP_NAME=${NAME}-${TIMESTAMP}

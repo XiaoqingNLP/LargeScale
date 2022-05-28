@@ -24,7 +24,7 @@ def get_multitask_data(mutlitask_data_path, collator: GLMPreprocessor, aggregate
         full_path = os.path.join(mutlitask_data_path, path)
         if os.path.isdir(full_path):
             print_rank_0(f"Loading multitask data {full_path}")
-            data = LMDBDataset(full_path, process_fn=lambda x: x)
+            data = LMDBDataset(full_path, process_fn=lambda row: (np.array(row[0]), np.array(row[1])))
             if path.endswith("eval"):
                 val_datasets.append(data)
             else:
@@ -37,8 +37,8 @@ def get_multitask_data(mutlitask_data_path, collator: GLMPreprocessor, aggregate
     # We need a random mapping here or will lose some task when multitask_ratio < actual data ratio
     train_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(train_datasets)),
                                        aggregated_samples_per_sequence, process_fn)
-    val_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(val_datasets)), aggregated_samples_per_sequence,
-                                     process_fn)
+    val_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(val_datasets)),
+                                     aggregated_samples_per_sequence, process_fn) if len(val_datasets) > 0 else []
     return train_datasets, val_datasets
 
 
@@ -91,8 +91,9 @@ def build_train_valid_test_datasets(
 
         train_dataset = ConcatDataset([train_dataset, multitask_train_dataset],
                                       weights=calc_weight(train_dataset, multitask_train_dataset, args.multitask_ratio))
-        valid_dataset = ConcatDataset([valid_dataset, multitask_valid_dataset],
-                                      weights=calc_weight(valid_dataset, multitask_valid_dataset, args.multitask_ratio))
+        if len(multitask_valid_dataset) > 0:
+            valid_dataset = ConcatDataset([valid_dataset, multitask_valid_dataset],
+                                          weights=calc_weight(valid_dataset, multitask_valid_dataset, args.multitask_ratio))
 
     scale = max(200, 1 + train_valid_test_num_samples[0] // len(train_dataset))
     train_dataset = RandomMappingDataset(train_dataset, scale=scale)
