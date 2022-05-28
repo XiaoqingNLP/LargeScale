@@ -100,6 +100,9 @@ def build_train_valid_test_datasets(
     valid_dataset = RandomMappingDataset(valid_dataset, scale=200)
     test_dataset = RandomMappingDataset(test_dataset, scale=200)
 
+    print_rank_0(
+        f"    all_train: {len(train_dataset)}, all_valid: {len(valid_dataset)}")
+
     return train_dataset, valid_dataset, test_dataset
 
 
