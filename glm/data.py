@@ -96,7 +96,7 @@ def build_train_valid_test_datasets(
                                           weights=calc_weight(valid_dataset, multitask_valid_dataset, args.multitask_ratio))
 
     scale = max(200, 1 + train_valid_test_num_samples[0] // len(train_dataset))
-    train_dataset = RandomMappingDataset(train_dataset, scale=scale)
+    train_dataset = RandomMappingDataset(train_dataset, scale=scale, seed=args.data_shuffle_seed)
     valid_dataset = RandomMappingDataset(valid_dataset, scale=200)
     test_dataset = RandomMappingDataset(test_dataset, scale=200)
 

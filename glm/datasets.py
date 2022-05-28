@@ -133,16 +133,17 @@ class RandomMappingDataset(Dataset):
     Dataset wrapper to randomly mapping indices to original order.
     Will also enlarge the length
     '''
-    def __init__(self, ds, scale=200, **kwargs):
+    def __init__(self, ds, scale=200, seed=None, **kwargs):
         self.wrapped_data = ds
         self.scale = scale
+        self.seed = random.Random(seed).randint(0, 2**32-1) if seed is not None else 0
 
     def __len__(self):
         return len(self.wrapped_data) * self.scale
 
     def __getitem__(self, index):
         rng = random.Random(index)
-        rng = np.random.RandomState(seed=[rng.randint(0, 2**32-1) for _ in range(16)])
+        rng = np.random.RandomState(seed=[self.seed ^ rng.randint(0, 2**32-1) for _ in range(16)])
         index = rng.randint(len(self.wrapped_data))
         return self.wrapped_data[index]
 

@@ -614,6 +614,8 @@ def _add_initialization_args(parser):
     group.add_argument('--seed', type=int, default=1234,
                        help='Random seed used for python, numpy, '
                        'pytorch, and cuda.')
+    group.add_argument('--data-shuffle-seed', type=int, default=None,
+                       help='Random seed used for shuffling GLM data')
     group.add_argument('--init-method-std', type=float, default=0.02,
                        help='Standard deviation of the zero mean normal '
                        'distribution used for weight initialization.')
