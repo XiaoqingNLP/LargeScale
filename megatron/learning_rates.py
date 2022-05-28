@@ -53,6 +53,10 @@ class AnnealingLR(object):
             assert not self.use_checkpoint_lr_scheduler, 'both override and '\
                 'use-checkpoint are set.'
 
+        self.load_steps = 0
+        self.warmup_steps_after_loading = args.warmup_samples_after_loading
+        if args.train_samples is None and args.warmup_samples_after_loading is not None:
+            assert False
         # Set the learning rate
         self.step(0)
 
@@ -105,8 +109,19 @@ class AnnealingLR(object):
         else:
             raise Exception('{} decay style is not supported.'.format(
                 self.decay_style))
-       
-        return self.min_lr + coeff * delta_lr
+
+        if (
+            self.warmup_steps_after_loading is not None
+            and self.num_steps < self.load_steps + self.warmup_steps_after_loading
+        ):
+            return max(
+                1e-7,
+                (self.min_lr + coeff * delta_lr)
+                * (self.num_steps - self.load_steps)
+                / self.warmup_steps_after_loading,
+            )
+        else:
+            return self.min_lr + coeff * delta_lr
 
 
     def step(self, increment, token_num=None):
@@ -190,3 +205,6 @@ class AnnealingLR(object):
         if 'num_tokens' in sd:
             self.num_tokens = sd['num_tokens']
         self.step(num_steps, self.num_tokens)
+
+        self.load_steps = self.num_steps
+        print_rank_0(f"Set lr_scheduler load_steps to {self.load_steps}")

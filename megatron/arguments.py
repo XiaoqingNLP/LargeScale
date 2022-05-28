@@ -657,6 +657,8 @@ def _add_learning_rate_args(parser):
     group.add_argument('--warmup', type=int, default=None,
                        help='Old lr warmup argument, do not use. Use one of the'
                        '--lr-warmup-* arguments above')
+    group.add_argument('--warmup-samples-after-loading', type=int, default=None,
+                       help='Warmup samples after loading checkpoint.')
     group.add_argument('--min-lr', type=float, default=0.0,
                        help='Minumum value for learning rate. The scheduler'
                        'clip values below this threshold.')
