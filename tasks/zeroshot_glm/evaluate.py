@@ -4,6 +4,7 @@ import os
 import glob
 import json
 import torch
+import numpy as np
 
 from megatron import get_args, get_tokenizer
 from megatron import print_rank_0, is_last_rank
@@ -47,6 +48,7 @@ def forward_step(batch, model):
     # Tell the model what our actual batch size will be
     args = get_args()
     args.micro_batch_size = len(labels)
+    args.seq_length = tokens.size(1)
     assert args.micro_batch_size == 1
 
     input_tensor = recv_forward()
@@ -69,28 +71,14 @@ def forward_step(batch, model):
         # tokenizer = get_tokenizer()
         # def decode(seq):
         #     return ' '.join([tokenizer.IdToToken(idx.item()) for idx in seq])
-
+        #
         # print(f'tokens: {decode(tokens[0, target_ids])}')
         # print(f'label: {decode(labels[0, target_ids])}')
-        logits = output[0, target_ids, labels[0, target_ids]]
-        # print(logits)
 
-        return logits.sum(dim=-1)
-        # # For loss, return the unreduced loss.
-        # if eval_metric == 'loss':
-        #     losses = mpu.vocab_parallel_cross_entropy(
-        #         output.contiguous().float(), labels.contiguous())
-        #     loss = torch.sum(
-        #         losses.view(-1) * loss_mask.contiguous().view(-1).float())
-        #     return loss
-        #
-        # # For accuracy, return the number of correctly predicted samples.
-        # if eval_metric == 'accuracy':
-        #     outputs = torch.argmax(output, -1)
-        #     correct = (outputs == labels).float()
-        #     correct[(1 - loss_mask).bool()] = 1
-        #     correct = correct.prod(-1)
-        #     return correct.sum()
+        target_vocab = labels[0, target_ids]
+        logits = output[0, target_ids, target_vocab]
+
+        return logits.tolist()
 
     return None
 
@@ -152,28 +140,34 @@ def main():
 
     # print(model)
 
+    datasets = []
     dataloaders = []
     folders = []
+    filenames = []
 
-    for file_name in sorted(glob.glob(f"{args.train_data[0]}/**/validation.json", recursive=True)):
-        dataset = build_dataset(file_name)
-        dataloader = build_data_loader(dataset, args.micro_batch_size,
-                                       args.num_workers, drop_last=False)
-        folder = os.path.dirname(file_name)
-        dataloaders.append(dataloader)
-        folders.append(folder)
-        print_rank_0(f"Loaded {file_name}")
+    for data in args.train_data:
+        for file_name in sorted(glob.glob(os.path.join(data, "./**/*.json"), recursive=True)):
+            if file_name.endswith("_predict.json"):
+                continue
+            dataset = build_dataset(file_name)
+            dataloader = build_data_loader(dataset, args.micro_batch_size,
+                                           args.num_workers, drop_last=False)
+            folder = os.path.dirname(file_name)
+            datasets.append(dataset)
+            dataloaders.append(dataloader)
+            folders.append(folder)
+            filenames.append(file_name)
+            print_rank_0(f"Loaded {file_name}")
 
     report_memory("Before train")
 
     for i in range(len(dataloaders)):
         outputs = evaluate(dataloaders[i], model)
-        folder = folders[i]
         if mpu.is_pipeline_last_stage() and mpu.get_tensor_model_parallel_rank() == 0:
-            with open(os.path.join(folder, 'predict.json'), 'w') as file:
-                for output in outputs:
-                    file.write(json.dumps({'prob': output.item()}) + '\n')
-            print(f"Finish {folder}")
+            with open(f"{filenames[i].replace('.json', '')}_predict.json", 'w') as file:
+                for idx, output in enumerate(outputs):
+                    file.write(json.dumps({'prob': output}) + '\n')
+            print(filenames[i])
 
     torch.distributed.barrier()
 
