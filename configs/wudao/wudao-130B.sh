@@ -8,7 +8,7 @@ EXP_NAME=${NAME}-${TIMESTAMP}
 CHECKPOINT_PATH="/thudm/LargeScale/checkpoints/${NAME}"
 TENSORBOARD_PATH="runs/wudao/${NAME}"
 
-config_json="./logs/${EXP_NAME}/ds_config.json"
+config_json="./ds-configs/${EXP_NAME}/ds_config.json"
 
 MICRO_BATCH_SIZE=1
 GLOBAL_BATCH_SIZE=4224 # 176 * 24
@@ -121,7 +121,7 @@ gpt_options=" \
        $OUTPUT_ARGS
 "
 
-mkdir -p logs/${EXP_NAME}
+mkdir -p ds-configs/${EXP_NAME}
 cat <<EOT > $config_json
 {
   "train_micro_batch_size_per_gpu": $MICRO_BATCH_SIZE,
