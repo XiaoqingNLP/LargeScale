@@ -101,7 +101,7 @@ def build_train_valid_test_datasets(
     test_dataset = RandomMappingDataset(test_dataset, scale=200)
 
     print_rank_0(
-        f"    all_train: {len(train_dataset)}, all_valid: {len(valid_dataset)}")
+        f"    all_train: {len(train_dataset)}, all_valid: {len(valid_dataset)}, data_shuffle_seed={args.data_shuffle_seed}")
 
     return train_dataset, valid_dataset, test_dataset
 
