@@ -175,8 +175,8 @@ class TransformingDataset(Dataset):
         self.consumed_samples += 1
         if self.if_print and int((self.consumed_samples - 1) / self.local_batch_size) != \
                 int((self.consumed_samples) / self.local_batch_size):
-            print(f'[Rank {torch.distributed.get_rank()}] iteration: {int((self.consumed_samples) / self.local_batch_size)}')
-            
+            print(f'[Rank {torch.distributed.get_rank()}] iteration: {int(iteration)}')
+
         ratio = 0
         if iteration >= self.end:
             ratio = 1
