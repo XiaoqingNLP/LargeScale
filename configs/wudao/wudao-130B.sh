@@ -2,7 +2,7 @@
 
 DATA_PATH="/thudm/LargeScale/data/merge"
 #MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask"
-MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask_en_zh_deepstruct_100k"
+#MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask_en_zh_deepstruct_100k"
 NAME="wudao-130B"
 
 EXP_NAME=${NAME}-${TIMESTAMP}
@@ -102,9 +102,8 @@ gpt_options=" \
        --train-samples $TRAIN_SAMPLES \
        --length-per-sample $LENGTH_PER_SAMPLE \
        --seq-length $SEQ_LEN \
-       --multitask-data-path $MULTITASK_DATA_PATH \
-       --multitask-ratio 0.05 \
        --data-path $DATA_PATH \
+       --data-shuffle-seed 42 \
        --save $CHECKPOINT_PATH \
        --load $CHECKPOINT_PATH \
        --abort-on-unmet-fused-kernel-constraints \
@@ -119,6 +118,8 @@ gpt_options=" \
        $DEEPSPEED_ARGS \
        $OUTPUT_ARGS
 "
+#       --multitask-data-path $MULTITASK_DATA_PATH \
+#       --multitask-ratio 0.05 \
 
 mkdir -p logs/${EXP_NAME}
 cat <<EOT > $config_json
