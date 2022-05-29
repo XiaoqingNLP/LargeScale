@@ -498,6 +498,7 @@ def _add_regularization_args(parser):
                        help='Momentum factor for sgd')
     group.add_argument('--shrink-embedding-gradient-alpha', type=float, default=1.0,
                        help='Shrink embedding gradient for alpha')
+    group.add_argument('--shrink-logit-embedding-gradient', action='store_true')
     group.add_argument('--shrink-embedding-gradient-steps', nargs='*', default=None,
                        help='--shrink-embedding-gradient-steps <x1> <x2>'
                             'Shrink embedding gradient alpha for x1 steps,'

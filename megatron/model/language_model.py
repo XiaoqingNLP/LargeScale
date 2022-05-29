@@ -31,6 +31,17 @@ def parallel_lm_logits(input_, word_embeddings_weight, parallel_output,
     """LM logits using word embedding weights."""
     # Parallel logits.
     input_parallel = mpu.copy_to_tensor_model_parallel_region(input_)
+    args = get_args()
+    if args.shrink_logit_embedding_gradient:
+        if hasattr(args, 'iteration'):
+            alpha = get_shrink_embedding_gradient_alpha(args.iteration + 1)
+        else:
+            alpha = args.shrink_embedding_gradient_alpha
+        word_embeddings_weight = word_embeddings_weight if alpha == 1.0 \
+            else (
+                word_embeddings_weight * alpha +
+                word_embeddings_weight.detach() * (1 - alpha)
+        )
     # Matrix multiply.
     if bias is None:
         logits_parallel = F.linear(input_parallel, word_embeddings_weight)
