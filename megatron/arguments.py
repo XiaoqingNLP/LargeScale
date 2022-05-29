@@ -964,8 +964,8 @@ def _add_data_args(parser):
                        'specific positions. This option tries to un-bias the loss by reweighting loss on specific '
                        'positions based on how frequently we train on that position.'
                        'This is mostly used for prefix_lm training')
-    group.add_argument("--multitask-data-path", type=str, default=None,
-                       help="Multitask data path")
+    group.add_argument("--multitask-data-path", nargs='*', default=None,
+                       help="Multitask data paths")
     group.add_argument("--multitask-ratio", type=float, default=0.05,
                        help="Ratio of multitask training data")
 
@@ -1139,4 +1139,7 @@ def _add_glm_args(parser):
     group.add_argument("--length-per-sample", type=int, default=None)
     group.add_argument("--aggregated-samples-per-sequence", type=int, default=1)
     group.add_argument('--aggregate-gpt-sample', action='store_true')
+    group.add_argument('--multitask-data-transform-steps', nargs='*', default=None,
+                       help='--multitask-data-transform-steps <x1> <x2>'
+                            'multitask ds1 -> ds2 in [x1, x2)')
     return parser

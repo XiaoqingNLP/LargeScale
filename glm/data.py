@@ -4,9 +4,10 @@ import os
 
 from megatron.enums import PositionEmbeddingType
 from .datasets import BinaryDataset, RandomMappingDataset, LMDBDataset, ConcatDataset, AggregatedDataset, split_ds
+from .datasets import TransformingDataset
 from .collator import GLMPreprocessor
-from megatron import get_tokenizer, print_rank_0
-
+from megatron import get_tokenizer, print_rank_0, get_num_microbatches
+from megatron.mpu import get_tensor_model_parallel_rank, is_pipeline_first_stage
 
 def get_input(tokens, targets, loss_masks, position_ids, division):
     return {
@@ -40,6 +41,17 @@ def get_multitask_data(mutlitask_data_path, collator: GLMPreprocessor, aggregate
     val_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(val_datasets)),
                                      aggregated_samples_per_sequence, process_fn) if len(val_datasets) > 0 else []
     return train_datasets, val_datasets
+
+
+def make_transforming_dataset(args, ds1, ds2):
+    assert args.multitask_data_transform_steps is not None and len(args.multitask_data_transform_steps) == 2
+    assert args.num_workers == 1  # for iteration calculation
+    start = int(args.multitask_data_transform_steps[0])
+    end = int(args.multitask_data_transform_steps[1])
+    # ds2 = RandomMappingDataset(ds2, scale=len(ds1) / len(ds2))
+    return TransformingDataset(ds1, ds2, start=start, end=end, iteration=args.iteration,
+        local_batch_size=get_num_microbatches() * args.micro_batch_size * args.multitask_ratio / args.num_workers,
+        if_print=is_pipeline_first_stage() and get_tensor_model_parallel_rank() == 0)
 
 
 def build_train_valid_test_datasets(
@@ -82,10 +94,22 @@ def build_train_valid_test_datasets(
     )
 
     if args.multitask_data_path is not None:
-        multitask_train_dataset, multitask_valid_dataset = \
-            get_multitask_data(args.multitask_data_path, collator, aggregated_samples_per_sequence)
-        print_rank_0(f"    multitask_train: {len(multitask_train_dataset)}, multitask_valid: {len(multitask_valid_dataset)}")
-
+        if len(args.multitask_data_path) == 1:
+            multitask_train_dataset, multitask_valid_dataset = \
+                get_multitask_data(args.multitask_data_path[0], collator, aggregated_samples_per_sequence)
+            print_rank_0(f"    multitask_train: {len(multitask_train_dataset)}, multitask_valid: {len(multitask_valid_dataset)}")
+        elif len(args.multitask_data_path) == 2:
+            multitask_train_dataset1, multitask_valid_dataset1 = \
+                get_multitask_data(args.multitask_data_path[0], collator, aggregated_samples_per_sequence)
+            multitask_train_dataset2, multitask_valid_dataset2 = \
+                get_multitask_data(args.multitask_data_path[1], collator, aggregated_samples_per_sequence)
+            print_rank_0(f"    multitask_train1: {len(multitask_train_dataset1)}, multitask_valid1: {len(multitask_valid_dataset1)}")
+            print_rank_0(f"    multitask_train2: {len(multitask_train_dataset2)}, multitask_valid2: {len(multitask_valid_dataset2)}")
+            multitask_train_dataset = make_transforming_dataset(args, multitask_train_dataset1, multitask_train_dataset2)
+            multitask_valid_dataset = multitask_valid_dataset2
+            print_rank_0(f"    transforming_multitask_train: {len(multitask_train_dataset)}")
+        else:
+            assert False
         def calc_weight(ds1, ds2, ratio):
             return [1, 1] if ratio is None else [1, ratio * len(ds1) / (len(ds2) * (1 - ratio))]
 

@@ -10,6 +10,7 @@
 import os
 import sys
 import math
+import torch
 import random
 
 import numpy as np
@@ -146,6 +147,50 @@ class RandomMappingDataset(Dataset):
         rng = np.random.RandomState(seed=[self.seed ^ rng.randint(0, 2**32-1) for _ in range(16)])
         index = rng.randint(len(self.wrapped_data))
         return self.wrapped_data[index]
+
+
+class TransformingDataset(Dataset):
+    '''
+    Dataset wrapper to gradually change one to another during training
+    ds1 -> ds2 in [start, end], calculate iteration based on consumed samples
+    assume ds1 or ds2 is random mapping dataset
+    '''
+    def __init__(self, ds1, ds2, start, end, iteration, local_batch_size, if_print=False):
+        self.ds1 = ds1
+        self.ds2 = ds2
+        self.start = start
+        self.end = end
+        self.init_iteration = iteration
+        self.consumed_samples = 0
+        self.local_batch_size = local_batch_size
+        self.if_print = if_print
+        if if_print:
+            print(f'transforming [{start}, {end}), local-batch-size: {local_batch_size}')
+
+    def __len__(self):
+        return len(self.ds1)
+
+    def __getitem__(self, index):
+        iteration = self.init_iteration + (self.consumed_samples) / self.local_batch_size
+        self.consumed_samples += 1
+        if self.if_print and int((self.consumed_samples - 1) / self.local_batch_size) != \
+                int((self.consumed_samples) / self.local_batch_size):
+            print(f'[Rank {torch.distributed.get_rank()}] iteration: {int((self.consumed_samples) / self.local_batch_size)}')
+            
+        ratio = 0
+        if iteration >= self.end:
+            ratio = 1
+        elif self.start <= iteration < self.end:
+            ratio = (iteration - self.start) / (self.end - self.start)
+
+        rng = random.Random(index)
+        rng = np.random.RandomState(seed=[rng.randint(0, 2**32-1) for _ in range(16)])
+        if rng.random() < 1 - ratio:
+            # print(f'[Rank {torch.distributed.get_rank()}] iteration: {iteration}, ratio: {ratio}, get ds1 {index} / {len(self.ds1)}')
+            return self.ds1[index]
+        else:
+            # print(f'[Rank {torch.distributed.get_rank()}] iteration: {iteration}, ratio: {ratio}, get ds2 {index}')
+            return self.ds2[index]
 
 
 class BlockedRandomSplitDataset(Dataset):
