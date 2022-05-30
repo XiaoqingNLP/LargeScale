@@ -47,7 +47,7 @@ def make_transforming_dataset(args, ds1, ds2):
     assert args.multitask_data_transform_steps is not None and len(args.multitask_data_transform_steps) == 2
     assert args.num_workers == 1  # for iteration calculation
     start = int(args.multitask_data_transform_steps[0])
-    end = int(args.multitask_data_transform_steps[1])
+    end = start + int(args.multitask_data_transform_steps[1])
     # ds2 = RandomMappingDataset(ds2, scale=len(ds1) / len(ds2))
     return TransformingDataset(ds1, ds2, start=start, end=end, iteration=args.iteration,
         local_batch_size=get_num_microbatches() * args.micro_batch_size * args.multitask_ratio / args.num_workers,
