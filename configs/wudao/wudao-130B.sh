@@ -104,6 +104,7 @@ gpt_options=" \
        --multitask-data-path $MULTITASK_DATA_PATH \
        --multitask-ratio 0.05 \
        --multitask-data-transform-steps 22850 24850 \
+       --warmup-samples-after-loading 8448000 \
        --num-workers 1 \
        --data-path $DATA_PATH \
        --save $CHECKPOINT_PATH \
@@ -113,8 +114,9 @@ gpt_options=" \
        --distributed-backend nccl \
        --checkpoint-activations \
        --init-method-std 0.0052 \
-       --shrink-embedding-gradient-alpha 0.1 \
-       --shrink-embedding-gradient-steps 6000 500 \
+       --shrink-logit-embedding-gradient \
+       --shrink-embedding-gradient-alpha 0.2 \
+       --shrink-embedding-gradient-steps 22850 26850 \
        --fp16 \
        $OPTIMIZER_ARGS \
        $DEEPSPEED_ARGS \
