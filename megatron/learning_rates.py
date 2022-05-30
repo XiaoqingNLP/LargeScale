@@ -54,11 +54,9 @@ class AnnealingLR(object):
                 'use-checkpoint are set.'
 
         self.load_steps = 0
-        self.lr_auto_warmup_steps = args.lr_auto_warmup_samples
-        # if args.train_samples is None and self.lr_auto_warmup_steps is not None:
-        #     assert False
+        self.lr_auto_warmup_steps = args.lr_auto_warmup_steps
         if self.lr_auto_warmup_steps:
-            print_rank_0(f"> lr-auto-warmup-interval: {self.lr_auto_warmup_steps}")
+            print_rank_0(f"> lr-auto-warmup-steps: {self.lr_auto_warmup_steps}")
         # Set the learning rate
         self.step(0)
 
@@ -112,15 +110,17 @@ class AnnealingLR(object):
             raise Exception('{} decay style is not supported.'.format(
                 self.decay_style))
 
+        args = get_args()
+        iteration = args.iteration if hasattr(args, 'iteration') else 0
         if (
             self.lr_auto_warmup_steps is not None
-            and self.lr_auto_warmup_steps[0] <= self.num_steps <
+            and self.lr_auto_warmup_steps[0] <= iteration <
                 self.lr_auto_warmup_steps[0] + self.lr_auto_warmup_steps[1]
         ):
             return max(
                 1e-7,
                 (self.min_lr + coeff * delta_lr)
-                * (self.num_steps - self.lr_auto_warmup_steps[0])
+                * (iteration - self.lr_auto_warmup_steps[0])
                 / self.lr_auto_warmup_steps[1],
             )
         else:
