@@ -325,6 +325,13 @@ def parse_args(extra_args_provider=None, defaults={},
     if args.apply_rotary_positional_embedding_kernel:
         assert not args.learnable_rotary_embedding, 'rope kernel only support unlearnable rope'
 
+    if len(args.lr_auto_warmup_samples) > 0:
+        assert len(args.lr_auto_warmup_samples) == 2, 'len(lr-auto-warmup-steps) != 2'
+        args.lr_auto_warmup_samples[0] = int(args.lr_auto_warmup_samples[0])
+        args.lr_auto_warmup_samples[1] = int(args.lr_auto_warmup_samples[1])
+    else:
+        args.lr_auto_warmup_samples = None
+
     _print_args(args)
     return args
 
@@ -660,8 +667,10 @@ def _add_learning_rate_args(parser):
     group.add_argument('--warmup', type=int, default=None,
                        help='Old lr warmup argument, do not use. Use one of the'
                        '--lr-warmup-* arguments above')
-    group.add_argument('--warmup-samples-after-loading', type=int, default=None,
-                       help='Warmup samples after loading checkpoint.')
+    # group.add_argument('--warmup-samples-after-loading', type=int, default=None,
+    #                    help='Warmup samples after loading checkpoint.')
+    group.add_argument('--lr-auto-warmup-samples', nargs='*', default=None,
+                       help='--lr-auto-warmup-samples <x1> <x2>')
     group.add_argument('--min-lr', type=float, default=0.0,
                        help='Minumum value for learning rate. The scheduler'
                        'clip values below this threshold.')

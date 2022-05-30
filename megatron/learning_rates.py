@@ -54,9 +54,11 @@ class AnnealingLR(object):
                 'use-checkpoint are set.'
 
         self.load_steps = 0
-        self.warmup_steps_after_loading = args.warmup_samples_after_loading
-        if args.train_samples is None and args.warmup_samples_after_loading is not None:
-            assert False
+        self.lr_auto_warmup_steps = args.lr_auto_warmup_samples
+        # if args.train_samples is None and self.lr_auto_warmup_steps is not None:
+        #     assert False
+        if self.lr_auto_warmup_steps:
+            print_rank_0(f"> lr-auto-warmup-interval: {self.lr_auto_warmup_steps}")
         # Set the learning rate
         self.step(0)
 
@@ -111,14 +113,16 @@ class AnnealingLR(object):
                 self.decay_style))
 
         if (
-            self.warmup_steps_after_loading is not None
-            and self.num_steps < self.load_steps + self.warmup_steps_after_loading
+            self.lr_auto_warmup_steps is not None
+            and self.lr_auto_warmup_steps[0] <= self.num_steps <
+                self.lr_auto_warmup_steps[0] + self.lr_auto_warmup_steps[1]
         ):
+            print(self.num_steps)
             return max(
                 1e-7,
                 (self.min_lr + coeff * delta_lr)
-                * (self.num_steps - self.load_steps)
-                / self.warmup_steps_after_loading,
+                * (self.num_steps - self.lr_auto_warmup_steps[0])
+                / self.lr_auto_warmup_steps[1],
             )
         else:
             return self.min_lr + coeff * delta_lr
@@ -205,6 +209,3 @@ class AnnealingLR(object):
         if 'num_tokens' in sd:
             self.num_tokens = sd['num_tokens']
         self.step(num_steps, self.num_tokens)
-
-        self.load_steps = self.num_steps
-        print_rank_0(f"Set lr_scheduler load_steps to {self.load_steps}")
