@@ -117,7 +117,6 @@ class AnnealingLR(object):
             and self.lr_auto_warmup_steps[0] <= self.num_steps <
                 self.lr_auto_warmup_steps[0] + self.lr_auto_warmup_steps[1]
         ):
-            print(self.num_steps)
             return max(
                 1e-7,
                 (self.min_lr + coeff * delta_lr)
