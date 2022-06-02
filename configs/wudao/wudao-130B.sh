@@ -1,7 +1,7 @@
 #! /bin/bash
 
 DATA_PATH="/thudm/LargeScale/merge"
-MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask /thudm/LargeScale/data/multitask_0601"
+MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask_0601"
 NAME="wudao-130B"
 
 EXP_NAME=${NAME}-${TIMESTAMP}
@@ -103,8 +103,6 @@ gpt_options=" \
        --seq-length $SEQ_LEN \
        --multitask-data-path $MULTITASK_DATA_PATH \
        --multitask-ratio 0.05 \
-       --multitask-data-transform-steps 22850 2000 \
-       --lr-auto-warmup-steps 22800 2000 \
        --num-workers 1 \
        --data-path $DATA_PATH \
        --save $CHECKPOINT_PATH \
@@ -122,6 +120,8 @@ gpt_options=" \
        $DEEPSPEED_ARGS \
        $OUTPUT_ARGS
 "
+#       --lr-auto-warmup-steps 22800 2000 \
+#       --multitask-data-transform-steps 22850 2000 \
 
 mkdir -p ds-configs/${EXP_NAME}
 cat <<EOT > $config_json
