@@ -532,15 +532,15 @@ class PipelineEngine(DeepSpeedEngine):
 
     def _aggregate_total_loss(self):
         # Scale loss, average among DP ranks, and bcast loss to the rest of my DP group
+        LOSS_TYPE = 3
         if self.is_last_stage():
             loss_all = torch.tensor(self.loss_all).to(self.device)
             input_types = torch.concat(self.input_types).to(self.device).squeeze(1)
-            loss_text = torch.sum(loss_all * (input_types == 0)) / (input_types == 0).sum()
-            loss_multitask = torch.sum(loss_all * input_types) / input_types.sum()
+            types_loss = [torch.sum(loss_all * (input_types == i)) / (input_types == i).sum() for i in range(LOSS_TYPE)]
 
             loss = self._scale_loss_by_gas(self.total_loss)
             # self.dp_group_loss = loss.clone().detach()
-            self.dp_group_loss = torch.tensor([loss, loss_text, loss_multitask]).to(self.device)
+            self.dp_group_loss = torch.tensor([loss, *types_loss]).to(self.device)
 
             ## Average loss across all data-parallel groups
             agg_loss = self.dp_group_loss.clone().detach()
@@ -561,7 +561,7 @@ class PipelineEngine(DeepSpeedEngine):
             src_rank = self.grid.stage_to_global(self.num_stages - 1)
             assert src_rank in self.grid.pp_group
             # losses = torch.Tensor([0., 0.]).to(self.device)
-            losses = torch.Tensor([[0., 0., 0.], [0., 0., 0.]]).to(self.device)
+            losses = torch.Tensor([[0.] * (LOSS_TYPE + 1), [0.] * (LOSS_TYPE + 1)]).to(self.device)
             dist.broadcast(tensor=losses,
                            src=src_rank,
                            group=self.grid.get_pipe_parallel_group())

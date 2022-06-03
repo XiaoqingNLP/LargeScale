@@ -255,7 +255,7 @@ class GLMPreprocessor:
                     position_ids = position_ids[0]
                 division = np.array([division], dtype=np.int)
                 sequences.append((tokens, targets, loss_masks, position_ids, division))
-            return self._pack_samples(sequences)
+            return *self._pack_samples(sequences), 0
         else:
             sequences = []
             if self.aggregate_gpt_sample:
@@ -313,7 +313,7 @@ class GLMPreprocessor:
                 # attention_mask = self.build_mask_matrix(division, self.max_seq_length)
                 division = np.array([division], dtype=np.int)
                 sequences.append((tokens, targets, loss_masks, position_ids, division))
-            return self._pack_samples(sequences)
+            return *self._pack_samples(sequences), 1
     def _get_single_multitask_data(self, text, target):
         max_seq_length = self.max_seq_length // self.aggregated_samples_per_sequence
         if len(text) + len(target) + 2 > max_seq_length:

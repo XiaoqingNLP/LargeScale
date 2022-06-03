@@ -450,7 +450,7 @@ def train_step(forward_step_func, data_iterator,
         grad_norm = model[0].get_global_grad_norm()
         num_zeros_in_grad = 0
         if loss.size(0) > 1:
-            return {'lm loss' : loss[0], 'text loss': loss[1], 'multitask loss': loss[2]}, skipped_iter, grad_norm, num_zeros_in_grad, None
+            return {'lm loss' : loss[0], 'bert loss': loss[1], 'gpt loss': loss[2], 'multitask loss': loss[3]}, skipped_iter, grad_norm, num_zeros_in_grad, None
         else:
             return {'lm loss' : loss[0]}, skipped_iter, grad_norm, num_zeros_in_grad, None
 
