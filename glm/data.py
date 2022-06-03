@@ -9,13 +9,14 @@ from .collator import GLMPreprocessor
 from megatron import get_tokenizer, print_rank_0, get_num_microbatches
 from megatron.mpu import get_tensor_model_parallel_rank, is_pipeline_first_stage
 
-def get_input(tokens, targets, loss_masks, position_ids, division):
+def get_input(tokens, targets, loss_masks, position_ids, division, is_multitask=False):
     return {
         "text": torch.tensor(tokens, dtype=torch.long),
         "target": torch.tensor(targets, dtype=torch.long),
         "loss_mask": torch.tensor(loss_masks, dtype=torch.long),
         "position_id": torch.tensor(position_ids, dtype=torch.long),
         "attention_mask": torch.tensor(division, dtype=torch.long),
+        "is_multitask": torch.tensor([is_multitask], dtype=torch.long)
     }
 
 
@@ -33,7 +34,7 @@ def get_multitask_data(mutlitask_data_path, collator: GLMPreprocessor, aggregate
 
     def process_fn(samples):
         # unpack List[(token, label)] to -> (List[tokens], List[labels])
-        return get_input(*collator.get_multitask_data(*list(zip(*samples))))
+        return get_input(*collator.get_multitask_data(*list(zip(*samples))), is_multitask=True)
 
     # We need a random mapping here or will lose some task when multitask_ratio < actual data ratio
     train_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(train_datasets)),

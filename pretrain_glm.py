@@ -78,7 +78,7 @@ def model_provider(pre_process=True, post_process=True):
 def process_data(data):
     args = get_args()
     # Items and their type.
-    keys = ['text', 'loss_mask', 'target', 'attention_mask', 'position_id']
+    keys = ['text', 'loss_mask', 'target', 'attention_mask', 'position_id', 'is_multitask']
     datatype = torch.int64
 
     data_b = mpu.broadcast_data(keys, data, datatype)
@@ -89,12 +89,13 @@ def process_data(data):
     attention_mask = data_b['attention_mask'].long()
     loss_mask = data_b['loss_mask'].float()
     position_ids = data_b['position_id'].long()
+    is_multitask = data_b['is_multitask'].long()
 
     attention_mask = build_mask_matrix(attention_mask, tokens.size(0),
                                        tokens.size(1))
     attention_mask = attention_mask.to(torch.bool)
 
-    return tokens, labels, loss_mask, attention_mask, position_ids
+    return tokens, labels, loss_mask, attention_mask, position_ids, is_multitask
 
 
 def get_batch(data_iterator):
@@ -111,7 +112,7 @@ def get_batch(data_iterator):
 def get_batch_pipe(data):
     """Modification of `get_batch` to work on `next(data_iterator)` instead of `data_iterator`"""
     args = get_args()
-    tokens, labels, loss_mask, attention_mask, position_ids = process_data(data)
+    tokens, labels, loss_mask, attention_mask, position_ids, is_multitask = process_data(data)
 
     if args.curriculum_learning and args.curriculum_seqlen < tokens.size()[1]:
         # seqlen-based curriculum learning
@@ -121,7 +122,7 @@ def get_batch_pipe(data):
         labels = labels[:, :args.curriculum_seqlen].contiguous()
         loss_mask = loss_mask[:, :args.curriculum_seqlen].contiguous()
 
-    return (tokens, position_ids, attention_mask), (labels, loss_mask)
+    return (tokens, position_ids, attention_mask), (labels, loss_mask, is_multitask)
 
 
 def loss_func(loss_mask, output_tensor):
