@@ -325,7 +325,7 @@ def parse_args(extra_args_provider=None, defaults={},
     if args.apply_rotary_positional_embedding_kernel:
         assert not args.learnable_rotary_embedding, 'rope kernel only support unlearnable rope'
 
-    if len(args.lr_auto_warmup_steps) > 0:
+    if args.lr_auto_warmup_steps and len(args.lr_auto_warmup_steps) > 0:
         assert len(args.lr_auto_warmup_steps) == 2, 'len(lr-auto-warmup-steps) != 2'
         args.lr_auto_warmup_steps[0] = int(args.lr_auto_warmup_steps[0])
         args.lr_auto_warmup_steps[1] = int(args.lr_auto_warmup_steps[1])
