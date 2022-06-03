@@ -40,7 +40,7 @@ OPTIMIZER_ARGS=" \
     --adam-beta1 0.9 \
     --adam-beta2 0.95 \
     --adam-eps 1e-8 \
-    --lr 8e-5 \
+    --lr 4e-5 \
     --min-lr 8e-6 \
     --override-lr-scheduler \
     --lr-decay-style cosine \
