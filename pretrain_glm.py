@@ -78,7 +78,9 @@ def model_provider(pre_process=True, post_process=True):
 def process_data(data):
     args = get_args()
     # Items and their type.
-    keys = ['text', 'loss_mask', 'target', 'attention_mask', 'position_id', 'task_type']
+    keys = ['text', 'loss_mask', 'target', 'attention_mask', 'position_id']
+    if not args.finetune:
+        keys.append('task_type')
     datatype = torch.int64
 
     data_b = mpu.broadcast_data(keys, data, datatype)
@@ -89,12 +91,14 @@ def process_data(data):
     attention_mask = data_b['attention_mask'].long()
     loss_mask = data_b['loss_mask'].float()
     position_ids = data_b['position_id'].long()
-    task_type = data_b['task_type'].long()
+    task_type = data_b['task_type'].long() if 'task_type' in data_b else None
 
     attention_mask = build_mask_matrix(attention_mask, tokens.size(0),
                                        tokens.size(1))
     attention_mask = attention_mask.to(torch.bool)
 
+    if task_type is None:
+        return tokens, labels, loss_mask, attention_mask, position_ids
     return tokens, labels, loss_mask, attention_mask, position_ids, task_type
 
 
