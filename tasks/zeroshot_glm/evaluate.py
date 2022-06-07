@@ -14,7 +14,7 @@ from megatron.training import get_model
 from megatron.utils import unwrap_model, report_memory
 from megatron.p2p_communication import recv_forward, send_forward
 
-from .datasets import build_dataset
+from .dataset.mmlu import build_dataset
 
 # These are needed to unwrap the model, would be nice to put these in megatron.utils if possible?
 from torch.nn.parallel.distributed import DistributedDataParallel as torchDDP
@@ -75,8 +75,9 @@ def forward_step(batch, model):
         # print(f'tokens: {decode(tokens[0, target_ids])}')
         # print(f'label: {decode(labels[0, target_ids])}')
 
-        target_vocab = labels[0, target_ids]
+        target_vocab = [20167, 20333, 20251, 20416]  # labels[0, target_ids]
         logits = output[0, target_ids, target_vocab]
+        # print(logits.tolist())
 
         return logits.tolist()
 
@@ -161,13 +162,18 @@ def main():
 
     report_memory("Before train")
 
+
     for i in range(len(dataloaders)):
         outputs = evaluate(dataloaders[i], model)
+        answer = datasets[i].answer
         if mpu.is_pipeline_last_stage() and mpu.get_tensor_model_parallel_rank() == 0:
+            count = 0
             with open(f"{filenames[i].replace('.json', '')}_predict.json", 'w') as file:
                 for idx, output in enumerate(outputs):
-                    file.write(json.dumps({'prob': output}) + '\n')
-            print(filenames[i])
+                    predict = chr(ord('A') + np.argmax(np.array(output)))
+                    file.write(json.dumps({'predict': predict}) + '\n')
+                    count += predict == answer[idx]
+            print(f"Finish {filenames[i]}, accuracy = {count / len(answer) * 100:.3f}%")
 
     torch.distributed.barrier()
 
