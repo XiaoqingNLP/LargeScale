@@ -113,8 +113,7 @@ gpt_options=" \
        --checkpoint-activations \
        --init-method-std 0.0052 \
        --shrink-logit-embedding-gradient \
-       --shrink-embedding-gradient-alpha 0.165 \
-       --shrink-embedding-gradient-steps 22850 6000 \
+       --shrink-embedding-gradient-alpha 0.1 \
        --fp16 \
        $OPTIMIZER_ARGS \
        $DEEPSPEED_ARGS \
@@ -122,6 +121,7 @@ gpt_options=" \
 "
 #       --lr-auto-warmup-steps 22800 2000 \
 #       --multitask-data-transform-steps 22850 2000 \
+#       --shrink-embedding-gradient-steps 22850 6000 \
 
 mkdir -p ds-configs/${EXP_NAME}
 cat <<EOT > $config_json
