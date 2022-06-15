@@ -54,7 +54,7 @@ def model_provider(pre_process=True, post_process=True):
                              config_dict_or_path=args.deepspeed_config,
                              enabled=args.zero_stage == 3,
                              mpu=mpu):
-        if args.deepspeed:
+        if args.deepspeed and args.pipeline_model_parallel_size > 1:
             # GLM has dynamic attn_mask, so don't set args.attn_mask
 
             model = GPTModelPipe(

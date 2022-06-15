@@ -443,7 +443,7 @@ def train_step(forward_step_func, data_iterator,
     args = get_args()
     timers = get_timers()
 
-    if args.deepspeed:
+    if args.deepspeed and isinstance(model[0], deepspeed.PipelineEngine):
         assert isinstance(model[0], deepspeed.PipelineEngine), model
         loss = model[0].train_batch(data_iter=data_iterator)
         skipped_iter = 0
@@ -511,6 +511,7 @@ def train_step(forward_step_func, data_iterator,
     # Update parameters.
     timers('optimizer').start()
     if args.deepspeed:
+        grad_norm_by_layer = None
         increment = get_num_microbatches() * \
                     args.micro_batch_size * \
                     args.data_parallel_size
