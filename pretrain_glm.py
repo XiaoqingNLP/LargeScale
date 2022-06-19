@@ -79,7 +79,7 @@ def process_data(data):
     args = get_args()
     # Items and their type.
     keys = ['text', 'loss_mask', 'target', 'attention_mask', 'position_id']
-    if not args.finetune:
+    if not args.finetune and args.deepspeed:
         keys.append('task_type')
     datatype = torch.int64
 

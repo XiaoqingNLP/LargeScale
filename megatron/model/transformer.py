@@ -183,6 +183,7 @@ class ParallelAttention(MegatronModule):
         self.num_attention_heads_per_partition = mpu.divide(
             args.num_attention_heads, world_size)
 
+        self.rotary_embedding_2d = args.rotary_embedding_2d
         self.apply_rotary_positional_embedding_kernel = args.apply_rotary_positional_embedding_kernel
 
         # Strided linear layer.
@@ -267,7 +268,9 @@ class ParallelAttention(MegatronModule):
 
         if self.position_embedding_type == PositionEmbeddingType.rotary:
             self.rotary_emb = RotaryEmbedding(
-                self.hidden_size_per_attention_head,
+                self.hidden_size_per_attention_head // 2
+                if self.rotary_embedding_2d
+                else self.hidden_size_per_attention_head,
                 base=10000,
                 precision=args.params_dtype,
                 learnable=args.learnable_rotary_embedding)
@@ -378,9 +381,19 @@ class ParallelAttention(MegatronModule):
                     else apply_rotary_pos_emb_index
                 )
                 # [b, sq] -> [sq, b]
-                position_ids = position_ids.transpose(0, 1)
-                cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
-                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
+                if self.rotary_embedding_2d:
+                    q1, q2 = query_layer.chunk(2, dim=(query_layer.ndim - 1))
+                    k1, k2 = key_layer.chunk(2, dim=(key_layer.ndim - 1))
+                    cos, sin = self.rotary_emb(q1, seq_len=position_ids.max() + 1)
+                    position_ids, block_position_ids = position_ids[0].transpose(0, 1), position_ids[1].transpose(0, 1)
+                    q1, k1 = apply_rotary_fn(q1, k1, cos, sin, position_ids)
+                    q2, k2 = apply_rotary_fn(q2, k2, cos, sin, block_position_ids)
+                    query_layer = torch.concat([q1, q2], dim=(q1.ndim - 1))
+                    key_layer = torch.concat([k1, k2], dim=(k1.ndim - 1))
+                else:
+                    position_ids = position_ids.transpose(0, 1)
+                    cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
+                    query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
             else:
                 apply_rotary_fn = (
                     apply_rotary_pos_emb_fused

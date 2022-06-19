@@ -1152,4 +1152,6 @@ def _add_glm_args(parser):
     group.add_argument('--multitask-data-transform-steps', nargs='*', default=None,
                        help='--multitask-data-transform-steps <x1> <x2>'
                             'multitask ds1 -> ds2 in [x1, x2)')
+    group.add_argument('--rotary-embedding-2d', action='store_true',
+                       help='If set, use 2D rotary embedding for GLM.')
     return parser
