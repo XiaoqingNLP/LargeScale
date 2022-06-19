@@ -91,31 +91,30 @@ def apply_rotary_pos_emb_fused(q, k, cos, sin, offset: int = 0):
 
 
 @torch.jit.script
-def apply_rotary_pos_emb_index(q, k, cos, sin, position_id):
+def apply_rotary_pos_emb_index(h, cos, sin, position_id):
     # position_id: [sq, b], q: [sq, b * np, hn] -> [sq, b, np, hn], cos: [sq, 1, hn] -> [sq, b, 1, hn]
-    sq, b, np = position_id.size(0), position_id.size(1), q.size(1) // position_id.size(1)
-    q, k = q.view(sq, b, np, -1), k.view(sq, b, np, -1)
+    sq, b, np = position_id.size(0), position_id.size(1), h.size(1) // position_id.size(1)
+    h = h.view(sq, b, np, -1)
     cos, sin = F.embedding(position_id, cos.squeeze(1)).unsqueeze(2), \
                F.embedding(position_id, sin.squeeze(1)).unsqueeze(2)
-    q, k = (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
-    return q.view(sq, b * np, -1), k.view(sq, b * np, -1)
+    h = (h * cos) + (rotate_half(h) * sin)
+    return h.view(sq, b * np, -1)
 
 
-def apply_rotary_pos_emb_index_torch(q, k, cos, sin, position_id):  # jitting fails with bf16
-    sq, b, np = position_id.size(0), position_id.size(1), q.size(1) // position_id.size(1)
-    q, k = q.view(sq, b, np, -1), k.view(sq, b, np, -1)
+def apply_rotary_pos_emb_index_torch(h, cos, sin, position_id):  # jitting fails with bf16
+    sq, b, np = position_id.size(0), position_id.size(1), h.size(1) // position_id.size(1)
+    h = h.view(sq, b, np, -1)
     cos, sin = F.embedding(position_id, cos.squeeze(1)).unsqueeze(2), \
                F.embedding(position_id, sin.squeeze(1)).unsqueeze(2)
-    q, k = (q * cos) + (rotate_half(q) * sin), (k * cos) + (rotate_half(k) * sin)
-    return q.view(sq, b * np, -1), k.view(sq, b * np, -1)
+    h = (h * cos) + (rotate_half(h) * sin)
+    return h.view(sq, b * np, -1)
 
 
-def apply_rotary_pos_emb_index_fused(q, k, cos, sin, position_id):
-    # position_id: [sq, b], q: [sq, b * np, hn] -> [sq, b, np, hn], cos: [sq, 1, hn] -> [sq, b, 1, hn]
-    sq, b, np = position_id.size(0), position_id.size(1), q.size(1) // position_id.size(1)
-    q, k = q.view(sq, b, np, -1), k.view(sq, b, np, -1)
+def apply_rotary_pos_emb_index_fused(h, cos, sin, position_id):
+    # position_id: [sq, b], h: [sq, b * np, hn] -> [sq, b, np, hn], cos: [sq, 1, hn] -> [sq, b, 1, hn]
+    sq, b, np = position_id.size(0), position_id.size(1), h.size(1) // position_id.size(1)
+    h = h.view(sq, b, np, -1)
     cos, sin = F.embedding(position_id, cos.squeeze(1)).unsqueeze(2), \
                F.embedding(position_id, sin.squeeze(1)).unsqueeze(2)
-    q = RotaryPositionalEmbeddingFunction.apply(q, cos, sin)
-    k = RotaryPositionalEmbeddingFunction.apply(k, cos, sin)
-    return q.view(sq, b * np, -1), k.view(sq, b * np, -1)
+    h = RotaryPositionalEmbeddingFunction.apply(h, cos, sin)
+    return h.view(sq, b * np, -1)

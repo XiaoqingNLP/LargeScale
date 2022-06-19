@@ -432,6 +432,14 @@ def _add_network_size_args(parser):
                        help='path to look for a kill switch, which if found will automatically exit the program'
                        )
 
+    group.add_argument('--prefix-prompt-length', type=int, default=None,
+                       help='Length of prefix prompt, None for not using')
+
+    group.add_argument('--prefix-prompt-num-layers', type=int, default=None,
+                       help='Number of prefix layers to insert prefix prompts, None for all the layers')
+
+    group.add_argument('--prefix-prompt-init-std', type=float, default=0.1,
+                       help='Standard deviation of the zero mean normal distribution used for prompt initialization')
 
     group.add_argument('--log-level', type=str, choices=list(log_levels.keys()),
                        help="Logger log level to use on the main process. Possible choices are the log levels as strings: 'debug', "

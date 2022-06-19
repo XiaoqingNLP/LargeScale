@@ -192,6 +192,16 @@ class ParallelAttention(MegatronModule):
                 3 * projection_size,
                 gather_output=False,
                 init_method=init_method)
+            self.prefix_prompt_length = args.prefix_prompt_length
+            self.add_prefix_prompt = False
+            if args.prefix_prompt_length is not None and (
+                    args.prefix_prompt_num_layers is None or layer_number <= args.prefix_prompt_num_layers):
+                self.add_prefix_prompt = True
+                init_std = args.prefix_prompt_init_std
+                self.prefix_prompts = torch.nn.Parameter(
+                    init_std * torch.randn(2, self.prefix_length, self.num_attention_heads_per_partition,
+                                self.hidden_size_per_attention_head)
+                )
             if args.deepnorm:
                 import deepspeed.runtime.activation_checkpointing.checkpointing as ds_checkpointing
                 if ds_checkpointing.is_configured():
@@ -339,6 +349,20 @@ class ParallelAttention(MegatronModule):
         if get_key_value:
             present = (key_layer, value_layer)
 
+        if self.add_prefix_prompt:
+            batch_size = hidden_states.size(1)
+            prefix_key, prefix_value = self.prefix_prompts
+            prefix_key = prefix_key.unsqueeze(1).expand(-1, batch_size, -1, -1)
+            prefix_value = prefix_value.unsqueeze(1).expand(-1, batch_size, -1, -1)
+            key_layer = torch.cat((prefix_key, key_layer), dim=0)
+            value_layer = torch.cat((prefix_value, value_layer), dim=0)
+            position_ids = position_ids + self.prefix_prompt_length
+            prefix_position_ids = torch.arange(self.prefix_prompt_length, dtype=position_ids.dtype)
+            prefix_position_ids = prefix_position_ids.unsqueeze(0).expand(batch_size, -1)
+            key_position_ids = torch.cat((prefix_position_ids, position_ids), dim=1)
+        else:
+            key_position_ids = None
+
         # ===================================
         # Raw attention scores. [b, np, s, s]
         # ===================================
@@ -380,7 +404,11 @@ class ParallelAttention(MegatronModule):
                 # [b, sq] -> [sq, b]
                 position_ids = position_ids.transpose(0, 1)
                 cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
-                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
+                query_layer = apply_rotary_fn(query_layer, cos, sin, position_ids)
+                if key_position_ids is not None:
+                    key_layer = apply_rotary_fn(key_layer, cos, sin, key_position_ids)
+                else:
+                    key_layer = apply_rotary_fn(key_layer, cos, sin, position_ids)
             else:
                 apply_rotary_fn = (
                     apply_rotary_pos_emb_fused
