@@ -197,9 +197,10 @@ class ParallelAttention(MegatronModule):
             if args.prefix_prompt_length is not None and (
                     args.prefix_prompt_num_layers is None or layer_number <= args.prefix_prompt_num_layers):
                 self.add_prefix_prompt = True
+                self.prefix_prompt_length = args.prefix_prompt_length
                 init_std = args.prefix_prompt_init_std
                 self.prefix_prompts = torch.nn.Parameter(
-                    init_std * torch.randn(2, self.prefix_length, self.num_attention_heads_per_partition,
+                    init_std * torch.randn(2, self.prefix_prompt_length, self.num_attention_heads_per_partition,
                                 self.hidden_size_per_attention_head)
                 )
             if args.deepnorm:
@@ -357,9 +358,12 @@ class ParallelAttention(MegatronModule):
             key_layer = torch.cat((prefix_key, key_layer), dim=0)
             value_layer = torch.cat((prefix_value, value_layer), dim=0)
             position_ids = position_ids + self.prefix_prompt_length
-            prefix_position_ids = torch.arange(self.prefix_prompt_length, dtype=position_ids.dtype)
+            prefix_position_ids = torch.arange(self.prefix_prompt_length, dtype=position_ids.dtype,
+                                               device=position_ids.device)
             prefix_position_ids = prefix_position_ids.unsqueeze(0).expand(batch_size, -1)
             key_position_ids = torch.cat((prefix_position_ids, position_ids), dim=1)
+            prefix_attention_mask = attention_mask.new_ones((*attention_mask.shape[:3], self.prefix_prompt_length))
+            attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=-1)
         else:
             key_position_ids = None
 
@@ -406,6 +410,7 @@ class ParallelAttention(MegatronModule):
                 cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
                 query_layer = apply_rotary_fn(query_layer, cos, sin, position_ids)
                 if key_position_ids is not None:
+                    key_position_ids = key_position_ids.transpose(0, 1)
                     key_layer = apply_rotary_fn(key_layer, cos, sin, key_position_ids)
                 else:
                     key_layer = apply_rotary_fn(key_layer, cos, sin, position_ids)
