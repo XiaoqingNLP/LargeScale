@@ -1,6 +1,7 @@
 import torch
 from torch.nn import Module
 from glm import build_mask_matrix
+from megatron.mpu import vocab_parallel_cross_entropy
 
 
 class GLMForMultiTokenCloze(torch.nn.Module):
@@ -149,14 +150,10 @@ class GLMForSingleTokenCloze(Module):
         # exit(0)
         outputs = self.model(input_ids, position_ids, build_mask_matrix(attention_mask,
                                 input_ids.size(0), input_ids.size(1)).to(torch.bool))
-        batch_ids = torch.arange(outputs.size(0), dtype=attention_mask.dtype, device=attention_mask.device)
+        batch_size, vocab_size, num_choices = outputs.size(0), outputs.size(-1), target_ids.size(1)
+        batch_ids = torch.arange(batch_size, dtype=attention_mask.dtype, device=attention_mask.device)
         target_logits = outputs[batch_ids, attention_mask]
-        if self.take_softmax:
-            target_prob = torch.nn.functional.log_softmax(target_logits, dim=-1)
-        else:
-            target_prob = target_logits
-        batch_ids = batch_ids.unsqueeze(1).expand_as(target_ids)
-        output = target_prob[batch_ids, target_ids]
-
+        target_logits = target_logits.repeat(1, target_ids.size(1)).reshape(batch_size, num_choices, vocab_size)
+        output = vocab_parallel_cross_entropy(target_logits, target_ids)
         return (output, target_logits)
 
