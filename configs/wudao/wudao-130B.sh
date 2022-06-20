@@ -13,13 +13,13 @@ config_json="./ds-configs/${EXP_NAME}/ds_config.json"
 MICRO_BATCH_SIZE=1
 GLOBAL_BATCH_SIZE=4224 # 176 * 24
 
-TP_SIZE=4
-PP_SIZE=8
+TP_SIZE=2
+PP_SIZE=1
 
-NHIDDEN=12288
+NHIDDEN=1024
 FFN_HIDDEN=$((NHIDDEN * 8 / 3))
-NLAYERS=70
-NHEADS=96
+NLAYERS=24
+NHEADS=16
 LENGTH_PER_SAMPLE=2000 # sequence length per sample from BinaryDataset
 SEQ_LEN=2048 # actual length during training (pad to this)
 

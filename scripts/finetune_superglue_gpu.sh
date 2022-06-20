@@ -11,7 +11,7 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
 
 TIMESTAMP=$(date +'%Y.%m.%d-%H:%M:%S')
 
-DATA_ROOT="/thudm/LargeScale/data/superglue"
+DATA_ROOT="/sharefs/cognitive/dataset/fd5061f60d4dd7a8e055690bd68d1e2c/english_data_new/superglue"
 
 source $1 # model
 source $2 # task
@@ -23,7 +23,6 @@ MICRO_BATCH_SIZE=$(($BATCH_SIZE/$WORLD_SIZE))
 python -m torch.distributed.launch $DISTRIBUTED_ARGS ./tasks/main.py \
        --seed 1234 \
        --task ${TASK_NAME} \
-       --pretrained-checkpoint ${CHECKPOINT_PATH} \
        --train-data ${DATA_PATH} \
        --micro-batch-size ${MICRO_BATCH_SIZE} \
        --seq-length ${MAX_SEQ_LEN} \
@@ -35,5 +34,6 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS ./tasks/main.py \
        ${GLM_ARGS} \
        ${TRAIN_ARGS} \
        ${COMMON_ARGS} \
+       --prefix-prompt-length 16 \
        2>&1 | tee logs/${EXP_NAME}/output.log
 #       --checkpoint-activations \
