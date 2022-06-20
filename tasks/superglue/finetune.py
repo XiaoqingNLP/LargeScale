@@ -96,6 +96,11 @@ def model_provider(pre_process=True, post_process=True, model_type='multiple_cho
         pass
     else:
         raise NotImplementedError
+    if args.prefix_prompt_length is not None:
+        model.requires_grad_(False)
+        for layer in model.model.language_model.encoder.layers:
+            if hasattr(layer.self_attention, "prefix_prompts"):
+                layer.self_attention.prefix_prompts.requires_grad_(True)
     return model
 
 
@@ -196,7 +201,7 @@ def finetune_forward_step(batch, model):
             loss_mask = data["loss_mask"]
             logits = logits * loss_mask - 10000.0 * (1.0 - loss_mask)
         if args.loss_func == "cross_entropy":
-            assert mpu.get_tensor_model_parallel_world_size() == 1
+            # assert mpu.get_tensor_model_parallel_world_size() == 1
             return logits.contiguous().float(), partial(cross_entropy_loss_func, labels)
         elif args.loss_func == "hinge":
             raise NotImplementedError
