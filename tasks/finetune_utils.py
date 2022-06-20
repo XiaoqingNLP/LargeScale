@@ -190,7 +190,7 @@ def _train(model, optimizer, lr_scheduler, forward_step,
 
             # Train for one step.
             out = train_step(forward_step, batch, model, optimizer, lr_scheduler)
-            losses_dict, skipped_iter, grad_norm, num_zeros_in_grad = out
+            losses_dict, skipped_iter, grad_norm, num_zeros_in_grad, grad_norm_by_layer = out
             iteration += 1
 
             # Logging.
