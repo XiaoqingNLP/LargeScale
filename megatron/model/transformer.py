@@ -26,7 +26,8 @@ from megatron.enums import AttnMaskType, LayerType, AttnType, PositionEmbeddingT
 from megatron.model.fused_layer_norm import MixedFusedLayerNorm as LayerNorm
 from megatron.model.fused_softmax import FusedScaleMaskSoftmax
 from megatron.model.fused_bias_gelu import bias_gelu_impl
-from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, get_deepnorm_coefficients
+from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, get_deepnorm_coefficients, \
+    init_method_normal
 from functools import partial
 
 import deepspeed
@@ -198,11 +199,13 @@ class ParallelAttention(MegatronModule):
                     args.prefix_prompt_num_layers is None or layer_number <= args.prefix_prompt_num_layers):
                 self.add_prefix_prompt = True
                 self.prefix_prompt_length = args.prefix_prompt_length
-                init_std = args.prefix_prompt_init_std
                 self.prefix_prompts = torch.nn.Parameter(
-                    init_std * torch.randn(2, self.prefix_prompt_length, self.num_attention_heads_per_partition,
-                                self.hidden_size_per_attention_head)
+                    torch.empty(2 * self.prefix_prompt_length * self.num_attention_heads_per_partition,
+                                self.hidden_size_per_attention_head, device=torch.cuda.current_device(),
+                                dtype=args.params_dtype)
                 )
+                mpu.layers._initialize_affine_weight_gpu(self.prefix_prompts,
+                                                         init_method_normal(args.prefix_prompt_init_std), 0)
             if args.deepnorm:
                 import deepspeed.runtime.activation_checkpointing.checkpointing as ds_checkpointing
                 if ds_checkpointing.is_configured():
@@ -352,7 +355,9 @@ class ParallelAttention(MegatronModule):
 
         if self.add_prefix_prompt:
             batch_size = hidden_states.size(1)
-            prefix_key, prefix_value = self.prefix_prompts
+            prefix_key, prefix_value = self.prefix_prompts.reshape(2, self.prefix_prompt_length,
+                                                                   self.num_attention_heads_per_partition,
+                                                                   self.hidden_size_per_attention_head)
             prefix_key = prefix_key.unsqueeze(1).expand(-1, batch_size, -1, -1)
             prefix_value = prefix_value.unsqueeze(1).expand(-1, batch_size, -1, -1)
             key_layer = torch.cat((prefix_key, key_layer), dim=0)
@@ -411,6 +416,7 @@ class ParallelAttention(MegatronModule):
                 query_layer = apply_rotary_fn(query_layer, cos, sin, position_ids)
                 if key_position_ids is not None:
                     key_position_ids = key_position_ids.transpose(0, 1)
+                    cos, sin = self.rotary_emb(value_layer, seq_len=key_position_ids.max() + 1)
                     key_layer = apply_rotary_fn(key_layer, cos, sin, key_position_ids)
                 else:
                     key_layer = apply_rotary_fn(key_layer, cos, sin, position_ids)
