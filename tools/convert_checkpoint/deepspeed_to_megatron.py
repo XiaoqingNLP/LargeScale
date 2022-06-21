@@ -28,6 +28,7 @@ def parse_arguments():
     parser.add_argument('--target_tp', default=1, type=int, help='Target TP degree')
     parser.add_argument('--target_pp', default=1, type=int, help='Target PP degree')
     parser.add_argument('--for_release', action='store_true', help='Convert for release purpose, reset some (progress) counters.')
+    parser.add_argument('--glu', action='store_true', help='Gated Linear Unit in the model')
     args = parser.parse_args()
     print(f'args = {args}')
     return args
@@ -140,7 +141,7 @@ def main():
     args = parse_arguments()
     print(f'Converting DeepSpeed checkpoint in {args.input_folder} to Megatron checkpoint in {args.output_folder}')
 
-    ds_checkpoint = DeepSpeedCheckpoint(args.input_folder, args.target_tp, args.target_pp)
+    ds_checkpoint = DeepSpeedCheckpoint(args.input_folder, args.target_tp, args.target_pp, args.glu)
     iteration = ds_checkpoint.get_iteration()
     _create_latest_file(args.output_folder, iteration)
     checkpoint_paths = _create_checkpoint_paths(args.output_folder, iteration, ds_checkpoint.tp_degree, ds_checkpoint.pp_degree)
