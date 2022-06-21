@@ -105,6 +105,7 @@ gpt_options=" \
        --multitask-ratio 0.05 \
        --num-workers 1 \
        --data-path $DATA_PATH \
+       --skip-train-iteration-range 40701-40900 \
        --save $CHECKPOINT_PATH \
        --load $CHECKPOINT_PATH \
        --abort-on-unmet-fused-kernel-constraints \
