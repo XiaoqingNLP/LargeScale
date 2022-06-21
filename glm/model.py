@@ -37,18 +37,9 @@ class GLMForMultiTokenCloze(torch.nn.Module):
             position_ids = position_ids.reshape(-1, *position_ids.size()[2:])
             target_ids = target_ids.reshape(-1, target_ids.size(-1))
             logit_mask = logit_mask.reshape(-1, logit_mask.size(-1))
-            if prompt_pos is not None:
-                prompt_pos = prompt_pos.reshape(-1, prompt_pos.size(-1))
         outputs = self.model(input_ids, position_ids, build_mask_matrix(attention_mask,
                                 input_ids.size(0), input_ids.size(1)).to(torch.bool))
-        if self.take_softmax:
-            outputs = torch.nn.functional.log_softmax(outputs, dim=-1)
-        # select the target logits
-        batch_ids = torch.arange(target_ids.size(0), dtype=torch.long, device=target_ids.device)
-        batch_ids = batch_ids.unsqueeze(1).expand_as(target_ids)
-        seq_ids = torch.arange(target_ids.size(-1), dtype=torch.long, device=target_ids.device)
-        seq_ids = seq_ids.unsqueeze(0).expand_as(target_ids)
-        logits = outputs[batch_ids, seq_ids, target_ids]
+        logits = -vocab_parallel_cross_entropy(outputs, target_ids)
         logits = (logits * logit_mask).sum(dim=1)
         if self.length_penalty > 0.0:
             logits = logits / logit_mask.sum(dim=1) ** self.length_penalty
@@ -154,6 +145,6 @@ class GLMForSingleTokenCloze(Module):
         batch_ids = torch.arange(batch_size, dtype=attention_mask.dtype, device=attention_mask.device)
         target_logits = outputs[batch_ids, attention_mask]
         target_logits = target_logits.repeat(1, target_ids.size(1)).reshape(batch_size, num_choices, vocab_size)
-        output = vocab_parallel_cross_entropy(target_logits, target_ids)
+        output = -vocab_parallel_cross_entropy(target_logits, target_ids)
         return (output, target_logits)
 
