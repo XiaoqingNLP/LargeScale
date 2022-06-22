@@ -26,7 +26,7 @@ from megatron.enums import AttnMaskType, LayerType, AttnType, PositionEmbeddingT
 from megatron.model.fused_layer_norm import MixedFusedLayerNorm as LayerNorm
 from megatron.model.fused_softmax import FusedScaleMaskSoftmax
 from megatron.model.fused_bias_gelu import bias_gelu_impl
-from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, get_deepnorm_coefficients
+from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, get_deepnorm_coefficients, init_method_normal
 from functools import partial
 
 import deepspeed
