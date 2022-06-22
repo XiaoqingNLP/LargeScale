@@ -396,7 +396,7 @@ class ParallelAttention(MegatronModule):
                         value_layer = torch.cat((prefix_value, value_layer), dim=0)
 
                         # attention_mask
-                        prefix_attention_mask = attention_mask.new_ones(
+                        prefix_attention_mask = attention_mask.new_zeros(
                             (*attention_mask.shape[:3], self.prefix_prompt_length))
                         attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=-1)
             else:
