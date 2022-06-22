@@ -13,8 +13,8 @@ config_json="./ds-configs/${EXP_NAME}/ds_config.json"
 MICRO_BATCH_SIZE=1
 GLOBAL_BATCH_SIZE=4224 # 176 * 24
 
-TP_SIZE=8
-PP_SIZE=1
+TP_SIZE=4
+PP_SIZE=8
 
 NHIDDEN=12288
 FFN_HIDDEN=$((NHIDDEN * 8 / 3))
