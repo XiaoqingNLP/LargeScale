@@ -330,6 +330,51 @@ class ParallelAttention(MegatronModule):
             query_layer = query_layer.view(*new_tensor_shape)
 
         # ==================================
+        # Rotary embeddings
+        # ==================================
+
+        if self.position_embedding_type == PositionEmbeddingType.rotary:
+            # q, k: [sq, b, np, hn]
+            if position_ids is not None:
+                apply_rotary_fn = (
+                    apply_rotary_pos_emb_index_fused
+                    if self.apply_rotary_positional_embedding_kernel
+                    else apply_rotary_pos_emb_index_torch
+                    if self.bf16
+                    else apply_rotary_pos_emb_index
+                )
+                if self.rotary_embedding_2d:
+                    q1, q2 = query_layer.chunk(2, dim=(query_layer.ndim - 1))
+                    k1, k2 = key_layer.chunk(2, dim=(key_layer.ndim - 1))
+                    cos, sin = self.rotary_emb(q1, seq_len=position_ids.max() + 1)
+                    position_ids, block_position_ids = position_ids[0].transpose(0, 1), position_ids[1].transpose(0, 1)
+                    q1, k1 = apply_rotary_fn(q1, k1, cos, sin, position_ids)
+                    q2, k2 = apply_rotary_fn(q2, k2, cos, sin, block_position_ids)
+                    query_layer = torch.concat([q1, q2], dim=(q1.ndim - 1))
+                    key_layer = torch.concat([k1, k2], dim=(k1.ndim - 1))
+                else:
+                    # [b, sq] -> [sq, b]
+                    position_ids = position_ids.transpose(0, 1)
+                    cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
+                    query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
+            else:
+                apply_rotary_fn = (
+                    apply_rotary_pos_emb_fused
+                    if self.apply_rotary_positional_embedding_kernel
+                    else apply_rotary_pos_emb_torch
+                    if self.bf16
+                    else apply_rotary_pos_emb
+                )
+
+                seq_len = key_layer.shape[0]
+                offset = 0
+                if layer_past is not None and layer_past.numel() > 0:
+                    offset = layer_past[0].shape[0]
+                    seq_len += offset
+                cos, sin = self.rotary_emb(value_layer, seq_len=seq_len)
+                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, offset=offset)
+
+        # ==================================
         # Adjust key and value for inference
         # ==================================
 
@@ -369,47 +414,6 @@ class ParallelAttention(MegatronModule):
                 device=torch.cuda.current_device())
         else:
             matmul_result = alibi[:output_size[0]*output_size[1], :, :output_size[3]] if alibi.size(1) == 1 else alibi
-
-        # Rotary embeddings
-        if self.position_embedding_type == PositionEmbeddingType.rotary:
-            if position_ids is not None:
-                apply_rotary_fn = (
-                    apply_rotary_pos_emb_index_fused
-                    if self.apply_rotary_positional_embedding_kernel
-                    else apply_rotary_pos_emb_index_torch
-                    if self.bf16
-                    else apply_rotary_pos_emb_index
-                )
-                # [b, sq] -> [sq, b]
-                if self.rotary_embedding_2d:
-                    q1, q2 = query_layer.chunk(2, dim=(query_layer.ndim - 1))
-                    k1, k2 = key_layer.chunk(2, dim=(key_layer.ndim - 1))
-                    cos, sin = self.rotary_emb(q1, seq_len=position_ids.max() + 1)
-                    position_ids, block_position_ids = position_ids[0].transpose(0, 1), position_ids[1].transpose(0, 1)
-                    q1, k1 = apply_rotary_fn(q1, k1, cos, sin, position_ids)
-                    q2, k2 = apply_rotary_fn(q2, k2, cos, sin, block_position_ids)
-                    query_layer = torch.concat([q1, q2], dim=(q1.ndim - 1))
-                    key_layer = torch.concat([k1, k2], dim=(k1.ndim - 1))
-                else:
-                    position_ids = position_ids.transpose(0, 1)
-                    cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
-                    query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
-            else:
-                apply_rotary_fn = (
-                    apply_rotary_pos_emb_fused
-                    if self.apply_rotary_positional_embedding_kernel
-                    else apply_rotary_pos_emb_torch
-                    if self.bf16
-                    else apply_rotary_pos_emb
-                )
-
-                seq_len = key_layer.shape[0]
-                offset = 0
-                if layer_past is not None and layer_past.numel() > 0:
-                    offset = layer_past[0].shape[0]
-                    seq_len += offset
-                cos, sin = self.rotary_emb(value_layer, seq_len=seq_len)
-                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, offset=offset)
 
         # Raw attention scores. [b * np, sq, sk]
         if alibi is None:
