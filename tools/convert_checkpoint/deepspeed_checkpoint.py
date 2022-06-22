@@ -14,7 +14,8 @@ SEQUENTIAL_LAYERS = [
     'self_attention.dense.bias',
     'post_attention_layernorm.weight', 'post_attention_layernorm.bias',
     'mlp.dense_4h_to_h.bias',
-    'position_embeddings.weight'
+    'position_embeddings.weight',
+    'self_attention.rotary_emb.inv_freq'
 ]
 
 LAYER_CONCAT_DIM = {
@@ -23,7 +24,7 @@ LAYER_CONCAT_DIM = {
 }
 
 class DeepSpeedCheckpoint(object):
-    def __init__(self, dir, tp_degree=None, pp_degree=None):
+    def __init__(self, dir, tp_degree=None, pp_degree=None, glu=False):
         self.dir = dir
         self.file_list = self._get_files(dir)
         self.zero_files = self._get_files_with_prefix(self.file_list, ZERO_FILE_PREFIX)
@@ -37,6 +38,7 @@ class DeepSpeedCheckpoint(object):
         self.tp_degree = self.original_tp_degree if tp_degree is None else tp_degree
         self.pp_degree = self.original_pp_degree if pp_degree is None else pp_degree
         self.global_state = {}
+        self.glu = glu
     
         self._sanity_check()
         self.pp_to_transformer_map = self._build_pp_transformer_map()
@@ -74,7 +76,7 @@ class DeepSpeedCheckpoint(object):
     def get_embedding_state(self, tp_index: int) -> Dict:
         assert tp_index in self.tp_to_embedding_map.keys()
         sd_list = [torch.load(fname, map_location=torch.device('cpu')) for fname in self.tp_to_embedding_map[tp_index]]
-        sd = self._merge_state_dicts(sd_list)
+        sd = self._merge_state_dicts(sd_list, tp_index)
         return sd
 
     def get_args(self):
@@ -91,7 +93,7 @@ class DeepSpeedCheckpoint(object):
         t_list = []
         for fname_list in self.transformer_file_map[(tp_index, pp_index)]:
             sd_list = [torch.load(fname, map_location=torch.device('cpu')) for fname in fname_list]
-            sd = self._merge_state_dicts(sd_list)
+            sd = self._merge_state_dicts(sd_list, tp_index)
             t_list.append(sd)
             print(f"[TP={tp_index}, PP={pp_index}] Finish loading {fname_list}")
         return t_list   
@@ -138,7 +140,7 @@ class DeepSpeedCheckpoint(object):
         return file_map
         
     def _sanity_check(self):
-        assert len(self.mp_rank_files) % self.tp_degree == 0
+        # assert len(self.mp_rank_files) % self.tp_degree == 0
         assert len(self.zero_files) % (self.pp_degree * self.tp_degree) == 0
         assert len(self.layer_keys) > 2
         assert len(self.layer_keys) % self.pp_degree == 0  # balanced pipeline partition
@@ -174,17 +176,41 @@ class DeepSpeedCheckpoint(object):
 
     def _partition_data(self, data_list, num_partitions):
         num_elems = len(data_list)
-        assert num_elems % num_partitions == 0
-        partition_size = num_elems // num_partitions
-        partitions_list = [data_list[i:i+partition_size] for i in range(0, num_elems, partition_size)]
-        return partitions_list
+        if num_elems >= num_partitions:
+            assert num_elems % num_partitions == 0
+            partition_size = num_elems // num_partitions
+            partitions_list = [data_list[i:i+partition_size] for i in range(0, num_elems, partition_size)]
+            return partitions_list
+        else:
+            partitions_list = []
+            for i in range(num_elems):
+                for _ in range(num_partitions // num_elems):
+                    partitions_list.append([data_list[i]])
+            return partitions_list
 
-    def _merge_state_dicts(self, sd_list):
+    def _merge_state_dicts(self, sd_list, tp_index):
         merged_sd = {}
         for key in sd_list[0].keys():
             if not key in SEQUENTIAL_LAYERS:
                 cat_dim = LAYER_CONCAT_DIM.get(key, 0)
-                merged_sd[key] = torch.cat([sd[key] for sd in sd_list], dim=cat_dim)
+                if self.original_tp_degree >= self.tp_degree:
+                    if key.startswith('mlp.dense_h_to_4h') and self.glu:
+                        if self.original_tp_degree > self.tp_degree:
+                            raise NotImplementedError
+                        else:
+                            merged_sd[key] = sd_list[0][key]
+                    else:
+                        merged_sd[key] = torch.cat([sd[key] for sd in sd_list], dim=cat_dim)
+                else:
+                    assert len(sd_list) == 1
+                    num_part = self.tp_degree // self.original_tp_degree
+                    if key.startswith('mlp.dense_h_to_4h') and self.glu:
+                        offset = tp_index % num_part
+                        chunks = torch.chunk(sd_list[0][key], num_part * 2, dim=cat_dim)
+                        merged_sd[key] = torch.cat([chunks[offset], chunks[num_part + offset]], dim=cat_dim)
+                    else:
+                        # without clone, torch will save entire tensor
+                        merged_sd[key] = torch.chunk(sd_list[0][key], num_part, dim=cat_dim)[tp_index % num_part].clone()
             else:
                 merged_sd[key] = sd_list[0][key]
         return merged_sd
