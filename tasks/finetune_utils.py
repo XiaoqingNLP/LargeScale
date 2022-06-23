@@ -228,7 +228,7 @@ def _train(model, optimizer, lr_scheduler, forward_step,
 
         # Callback at the end of each epoch.
         if end_of_epoch_callback is not None:
-            end_of_epoch_callback(model, epoch)
+            end_of_epoch_callback(model, epoch + 1)
 
 
 def finetune(train_valid_datasets_provider, model_provider,
@@ -270,7 +270,7 @@ def finetune(train_valid_datasets_provider, model_provider,
     if args.iteration == 0 and args.pretrained_checkpoint is not None:
         original_load = args.load
         args.load = args.pretrained_checkpoint
-        _ = load_checkpoint(model, None, None)
+        _ = load_checkpoint(model, None, None, strict=args.prefix_prompt_length is None)
         args.load = original_load
         # This is critical when only model is loaded. We should make sure
         # main parameters are also updated.

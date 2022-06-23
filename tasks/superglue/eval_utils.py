@@ -8,7 +8,7 @@ import datetime
 import subprocess
 
 from megatron import mpu
-from megatron import print_rank_0  # ,get_spare_port, debug_finetune_data
+from megatron import print_rank_0, is_last_rank, get_tensorboard_writer
 from tasks.superglue.data_utils import build_data_loader
 # from finetune import process_batch
 from collections import OrderedDict
@@ -57,7 +57,8 @@ def accuracy_func_provider(single_dataset_provider, metric_dict, args, is_test=F
             drop_last=False, shuffle=False, only_rank0=only_rank0)
         dataloaders.append((dataset.dataset_name, dataloader))
 
-    def metrics_func(model, epoch, output_predictions=False, summary_writer=None):
+    def metrics_func(model, epoch, output_predictions=False):
+        summary_writer = get_tensorboard_writer() if is_last_rank() else None
         print_rank_0('calculating metrics ...')
         score_dict = OrderedDict([(key, 0.0) for key in metric_dict]) if isinstance(metric_dict, dict) else {
             metric_dict: 0.0}
