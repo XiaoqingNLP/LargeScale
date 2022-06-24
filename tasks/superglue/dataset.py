@@ -32,7 +32,7 @@ import numpy as np
 from tasks.superglue.data_utils import InputExample
 from megatron import print_rank_0
 from tasks.superglue.pvp import PVPS
-from tasks.superglue.data_utils import build_input_from_ids, build_sample, num_special_tokens_to_add
+from tasks.superglue.data_utils import build_input_from_ids, num_special_tokens_to_add
 from collections import defaultdict
 from tasks.superglue.data_utils import punctuation_standardization
 
@@ -199,8 +199,7 @@ class DataProcessor(ABC):
                                                        add_piece=False)
         if len(tokens_a) + len(tokens_b) + num_special_tokens > seq_length:
             self.num_truncated += 1
-        data = build_input_from_ids(tokens_a, tokens_b, None, seq_length, tokenizer, args=args,
-                                    add_cls=True, add_sep=True, add_piece=False)
+        data = build_input_from_ids(tokens_a, tokens_b, None, seq_length, tokenizer, args=args, add_piece=False)
         ids, types, paddings, position_ids, sep, target_ids, loss_masks = data
         label = 0
         if example.label is not None:
@@ -489,8 +488,7 @@ class CopaProcessor(SuperGLUEProcessor):
                                                            add_piece=False)
             if len(tokens_a) + len(tokens_b) + num_special_tokens > seq_length:
                 self.num_truncated += 1
-            data = build_input_from_ids(tokens_a, tokens_b, None, seq_length, tokenizer, args,
-                                        add_cls=True, add_sep=True, add_piece=False)
+            data = build_input_from_ids(tokens_a, tokens_b, None, seq_length, tokenizer, args, add_piece=False)
             ids, types, paddings, position_ids, sep, target_ids, loss_masks = data
             if args.pretrained_bert:
                 ids_list.append(ids)
@@ -708,7 +706,7 @@ class RecordProcessor(SuperGLUEProcessor):
             if total_length > seq_length:
                 self.num_truncated += 1
             data = build_input_from_ids(tokens_a, tokens_b + answer_ids, None, seq_length, tokenizer, args,
-                                        add_cls=True, add_sep=True, add_piece=False)
+                                        add_piece=False)
             ids, types, paddings, position_ids, sep, target_ids, loss_masks = data
             if args.pretrained_bert:
                 ids_list.append(ids)

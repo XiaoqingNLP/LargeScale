@@ -104,11 +104,9 @@ def num_special_tokens_to_add(text_a_ids, text_b_ids, answer_ids, add_cls, add_s
     return num_tokens
 
 
-def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tokenizer, args=None, add_cls=True,
-                         add_sep=False, add_piece=False, add_eos=True, mask_id=None):
+def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tokenizer, args=None, add_piece=False,
+                         add_eos=True, mask_id=None):
     assert add_eos is True
-    add_cls = False
-    add_sep = False  # Hack for GLM with icetk
     if mask_id is None:
         mask_id = tokenizer.get_special_token('MASK')
     eos_id = tokenizer.get_special_token('eos')
@@ -117,11 +115,6 @@ def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tok
     ids = []
     types = []
     paddings = []
-    # CLS
-    if add_cls:
-        ids.append(cls_id)
-        types.append(0)
-        paddings.append(1)
     # A
     len_text_a = len(text_a_ids)
     ids.extend(text_a_ids)
@@ -130,10 +123,6 @@ def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tok
     # B
     if text_b_ids is not None:
         # SEP
-        if add_sep:
-            ids.append(sep_id)
-            types.append(0)
-            paddings.append(1)
         len_text_b = len(text_b_ids)
         ids.extend(text_b_ids)
         types.extend([1] * len_text_b)
@@ -191,21 +180,18 @@ def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tok
         loss_masks.extend([0] * padding_length)
     if not args.position_embedding_type == PositionEmbeddingType.rotary:
         position_ids = [position_ids, block_position_ids]
-    return ids, types, paddings, position_ids, sep, target_ids, loss_masks
+    return {"text": ids, "types": types, "padding_mask": paddings, "position": position_ids, "mask": sep,
+            "target": target_ids, "loss_mask": loss_masks}
 
 
-def build_decoder_input(enc_ids, answer_ids, max_seq_length, max_dec_seq_length, tokenizer):
+def build_decoder_input(enc_ids, answer_ids, max_dec_seq_length, tokenizer, mask_id=None):
     args = get_args()
 
-    mask_id = tokenizer.get_special_token('MASK')
+    if mask_id is None:
+        mask_id = tokenizer.get_special_token('MASK')
     eos_id = tokenizer.get_special_token('eos')
     sop_id = tokenizer.get_special_token('sop')
-    enc_len = len(enc_ids)
     masks = []
-    # TODO: it probably takes too much memory
-    # for i in range(max_dec_seq_length):
-    #     m = [1]*enc_len + [0]*(max_seq_length - enc_len) + [1]*(i+1) + [0]*(max_dec_seq_length-1-i)
-    #     masks.append(m)
     mask_position = enc_ids.index(mask_id)
     len_answer = len(answer_ids)
     ids = [sop_id] + answer_ids[:-1]
@@ -228,41 +214,6 @@ def build_decoder_input(enc_ids, answer_ids, max_seq_length, max_dec_seq_length,
     if not args.position_embedding_type == PositionEmbeddingType.rotary:
         position_ids = [position_ids, block_position_ids]
     return ids, types, paddings, position_ids, masks, target_ids, loss_masks
-
-
-def build_sample(ids, types=None, paddings=None, positions=None, masks=None, label=None, unique_id=None, target=None,
-                 logit_mask=None, segment_ids=None, prompt_ids=None):
-    """Convert to numpy and return a sample consumed by the batch producer."""
-
-    ids_np = np.array(ids, dtype=np.int64)
-    sample = {'text': ids_np, 'label': int(label)}
-    if types is not None:
-        types_np = np.array(types, dtype=np.int64)
-        sample['types'] = types_np
-    if paddings is not None:
-        paddings_np = np.array(paddings, dtype=np.int64)
-        sample['padding_mask'] = paddings_np
-    if positions is not None:
-        positions_np = np.array(positions, dtype=np.int64)
-        sample['position'] = positions_np
-    if masks is not None:
-        masks_np = np.array(masks, dtype=np.int64)
-        sample['mask'] = masks_np
-    if target is not None:
-        target_np = np.array(target, dtype=np.int64)
-        sample['target'] = target_np
-    if logit_mask is not None:
-        logit_mask_np = np.array(logit_mask, dtype=np.int64)
-        sample['logit_mask'] = logit_mask_np
-    if segment_ids is not None:
-        segment_ids = np.array(segment_ids, dtype=np.int64)
-        sample['segment_id'] = segment_ids
-    if prompt_ids is not None:
-        prompt_ids = np.array(prompt_ids, dtype=np.int64)
-        sample['prompt_pos'] = prompt_ids
-    if unique_id is not None:
-        sample['uid'] = unique_id
-    return sample
 
 
 def build_decoder_sample(sample, dec_ids, dec_position, dec_masks, dec_target, dec_logit_mask):
@@ -292,7 +243,7 @@ def my_collate(batch):
                     sample[key] = pad_choice_dim(value, max_choice_num)
                 else:
                     sample[key] = value
-            sample['loss_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
+            sample['choice_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
                                            dtype=np.int64)
 
     if 'dec_text' in new_batch[0]:
@@ -303,7 +254,7 @@ def my_collate(batch):
                 for key, value in sample.items():
                     if key.startswith('dec_'):
                         sample[key] = pad_choice_dim(value, max_choice_num)
-                sample['loss_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
+                sample['choice_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
                                                dtype=np.int64)
 
     new_batch = default_collate(new_batch)
