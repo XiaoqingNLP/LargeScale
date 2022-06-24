@@ -91,6 +91,14 @@ def apply_rotary_pos_emb_fused(q, k, cos, sin, offset: int = 0):
 
 
 @torch.jit.script
+def apply_rotary_pos_emb_index_single(q, cos, sin, position_id):
+    # position_id: [sq, b], q, k: [sq, b, np, hn], cos: [sq, 1, hn] -> [sq, b, 1, hn]
+    cos, sin = F.embedding(position_id, cos.squeeze(1)).unsqueeze(2), \
+               F.embedding(position_id, sin.squeeze(1)).unsqueeze(2)
+    return (q * cos) + (rotate_half(q) * sin)
+
+
+@torch.jit.script
 def apply_rotary_pos_emb_index(q, k, cos, sin, position_id):
     # position_id: [sq, b], q, k: [sq, b, np, hn], cos: [sq, 1, hn] -> [sq, b, 1, hn]
     cos, sin = F.embedding(position_id, cos.squeeze(1)).unsqueeze(2), \

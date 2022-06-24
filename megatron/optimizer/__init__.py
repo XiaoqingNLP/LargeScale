@@ -36,14 +36,14 @@ def _get_params_for_weight_decay_optimization(modules):
             if isinstance(module_, LayerNorm):
                 no_weight_decay_params['params'].extend(
                     [p for p in list(module_._parameters.values())
-                     if p is not None])
+                     if p is not None and p.requires_grad])
             else:
                 weight_decay_params['params'].extend(
                     [p for n, p in list(module_._parameters.items())
-                     if p is not None and n != 'bias'])
+                     if p is not None and n != 'bias' and p.requires_grad])
                 no_weight_decay_params['params'].extend(
                     [p for n, p in list(module_._parameters.items())
-                     if p is not None and n == 'bias'])
+                     if p is not None and n == 'bias' and p.requires_grad])
 
     # XXX: temp hack to workaround the crash in apex FusedAdam's multi_tensor_applier
     #
