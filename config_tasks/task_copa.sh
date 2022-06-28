@@ -15,7 +15,9 @@ TRAIN_ARGS="--lr-decay-style linear \
 COMMON_ARGS="--save-interval 10000 \
              --log-interval 20 \
              --eval-interval 1000 \
-             --eval-iters 100"
+             --eval-iters 100 \
+             --fast-decode \
+             --tgt-seq-length 32"
 
 PATTERN_IDS=(0 1)
 PROMPT_IDS=(1 2)
