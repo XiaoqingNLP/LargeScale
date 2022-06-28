@@ -25,6 +25,7 @@ import numpy as np
 import torch
 import torch.utils.data
 from torch.utils.data.dataloader import default_collate
+from scipy.linalg import block_diag
 
 from megatron.enums import PositionEmbeddingType
 from megatron import get_args, mpu
@@ -180,7 +181,7 @@ def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tok
         loss_masks.extend([0] * padding_length)
     if not args.position_embedding_type == PositionEmbeddingType.rotary:
         position_ids = [position_ids, block_position_ids]
-    return {"text": ids, "types": types, "padding_mask": paddings, "position": position_ids, "mask": sep,
+    return {"text": ids, "types": types, "padding_mask": paddings, "position": position_ids, "attention_mask": sep,
             "target": target_ids, "loss_mask": loss_masks}
 
 
@@ -191,7 +192,6 @@ def build_decoder_input(enc_ids, answer_ids, max_dec_seq_length, tokenizer, mask
         mask_id = tokenizer.get_special_token('MASK')
     eos_id = tokenizer.get_special_token('eos')
     sop_id = tokenizer.get_special_token('sop')
-    masks = []
     mask_position = enc_ids.index(mask_id)
     len_answer = len(answer_ids)
     ids = [sop_id] + answer_ids[:-1]
@@ -213,16 +213,57 @@ def build_decoder_input(enc_ids, answer_ids, max_dec_seq_length, tokenizer, mask
         loss_masks.extend([0] * padding_length)
     if not args.position_embedding_type == PositionEmbeddingType.rotary:
         position_ids = [position_ids, block_position_ids]
-    return ids, types, paddings, position_ids, masks, target_ids, loss_masks
+    return {"dec_text": ids, "dec_types": types, "dec_padding_mask": paddings, "dec_position": position_ids,
+            "dec_target": target_ids, "dec_logit_mask": loss_masks}
 
 
-def build_decoder_sample(sample, dec_ids, dec_position, dec_masks, dec_target, dec_logit_mask):
-    sample['dec_text'] = np.array(dec_ids)
-    sample['dec_position'] = np.array(dec_position)
-    sample['dec_mask'] = np.array(dec_masks)
-    sample['dec_target'] = np.array(dec_target)
-    sample['dec_logit_mask'] = np.array(dec_logit_mask)
-    return sample
+def build_concatenated_input(text, choices, max_seq_length, tokenizer, add_cls=False, add_eos=True, mask_id=None):
+    args = get_args()
+
+    ids = []
+    if add_cls:
+        cls_id = tokenizer.get_special_token('ENC')
+        ids.append(cls_id)
+    ids.extend(text)
+    if add_eos:
+        eos_id = tokenizer.get_special_token('eos')
+        ids.append(eos_id)
+    sep = len(ids)
+    target_id = [0] * len(ids)
+    loss_mask = [0] * len(ids)
+    position_ids = list(range(len(ids)))
+    block_position_ids = [0] * len(ids)
+    sop_id = tokenizer.get_special_token('sop')
+    if mask_id is None:
+        mask_id = tokenizer.get_special_token('MASK')
+    mask_position = ids.index(mask_id)
+    choice_target_ids, choice_loss_masks, choice_attention_masks = [], [], [np.ones((sep, sep), dtype=np.long)]
+    for choice_ids in choices:
+        ids.extend([sop_id] + choice_ids[:-1])
+        position_ids.extend([mask_position] * len(choice_ids))
+        block_position_ids.extend(range(1, len(choice_ids) + 1))
+        target_id = target_id + choice_ids
+        choice_target_ids.append(target_id)
+        choice_loss_masks.append(loss_mask + [1] * len(choice_ids))
+        loss_mask = loss_mask + [0] * len(choice_ids)
+        choice_attention_masks.append(np.tril(np.ones((len(choice_ids), len(choice_ids)), dtype=np.long)))
+    padding_length = max_seq_length - len(ids)
+    if padding_length > 0:
+        ids.extend([0] * padding_length)
+        position_ids.extend([0] * padding_length)
+        block_position_ids.extend([0] * padding_length)
+        choice_attention_masks.append(np.ones((padding_length, padding_length), dtype=np.long))
+    for i in range(len(choice_target_ids)):
+        if len(choice_target_ids[i]) < max_seq_length:
+            choice_target_ids[i].extend([0] * (max_seq_length - len(choice_target_ids[i])))
+            choice_loss_masks[i].extend([0] * (max_seq_length - len(choice_loss_masks[i])))
+    attention_mask = block_diag(*choice_attention_masks)
+    attention_mask[:, :sep] = 1
+    attention_mask = attention_mask[None, :, :]
+    if not args.position_embedding_type == PositionEmbeddingType.rotary:
+        position_ids = [position_ids, block_position_ids]
+    return {"text": ids, "position": position_ids, "attention_mask": attention_mask, "target": choice_target_ids,
+            "loss_mask": choice_loss_masks}
 
 
 def my_collate(batch):
@@ -244,9 +285,18 @@ def my_collate(batch):
                 else:
                     sample[key] = value
             sample['choice_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
-                                           dtype=np.int64)
-
-    if 'dec_text' in new_batch[0]:
+                                             dtype=np.int64)
+    elif 'target' in new_batch[0]:
+        target_list = [sample['target'] for sample in batch]
+        if len(target_list[0].shape) == 2:
+            choice_nums = list(map(len, target_list))
+            max_choice_num = max(choice_nums)
+            for i, sample in enumerate(new_batch):
+                for key in ['target', 'loss_mask']:
+                    sample[key] = pad_choice_dim(sample[key], max_choice_num)
+                sample['choice_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
+                                             dtype=np.int64)
+    elif 'dec_text' in new_batch[0]:
         choice_nums = [len(sample['dec_text']) for sample in new_batch]
         if choice_nums.count(choice_nums[0]) != len(choice_nums):
             max_choice_num = max(choice_nums)
@@ -255,7 +305,7 @@ def my_collate(batch):
                     if key.startswith('dec_'):
                         sample[key] = pad_choice_dim(value, max_choice_num)
                 sample['choice_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
-                                               dtype=np.int64)
+                                                 dtype=np.int64)
 
     new_batch = default_collate(new_batch)
     if 'uid' in batch[0]:

@@ -106,14 +106,13 @@ class SuperGlueDataset(Dataset):
                 for pattern_id in pattern_ids:
                     self.pvps.append(PVPS[task_name](args, tokenizer, self.processor.get_labels(), seq_length,
                                                      pattern_id=pattern_id, num_prompt_tokens=args.num_prompt_tokens,
-                                                     is_multi_token=args.multi_token,
-                                                     max_segment_length=args.segment_length,
-                                                     fast_decode=args.fast_decode, split=split))
+                                                     is_multi_token=args.multi_token, fast_decode=args.fast_decode,
+                                                     split=split, tgt_seq_length=args.tgt_seq_length))
             else:
                 self.pvp = PVPS[task_name](args, tokenizer, self.processor.get_labels(), seq_length,
                                            pattern_id=args.pattern_id, num_prompt_tokens=args.num_prompt_tokens,
-                                           is_multi_token=args.multi_token, max_segment_length=args.segment_length,
-                                           fast_decode=args.fast_decode, split=split)
+                                           is_multi_token=args.multi_token, fast_decode=args.fast_decode, split=split,
+                                           tgt_seq_length=args.tgt_seq_length)
         self.examples = {example.guid: example for example in example_list}
 
     def __len__(self):

@@ -936,6 +936,7 @@ def _add_data_args(parser):
                             'They are used for span masking in the T5 model')
     group.add_argument('--seq-length', type=int, default=None,
                        help='Maximum sequence length to process.')
+    group.add_argument('--tgt-seq-length', type=int, default=16)
     group.add_argument('--encoder-seq-length', type=int, default=None,
                        help='Maximum encoder sequence length to process.'
                        'This should be exclusive of --seq-length')
@@ -1162,4 +1163,5 @@ def _add_glm_args(parser):
                             'multitask ds1 -> ds2 in [x1, x2)')
     group.add_argument('--rotary-embedding-2d', action='store_true',
                        help='If set, use 2D rotary embedding for GLM.')
+    group.add_argument('--fast-decode', action='store_true')
     return parser

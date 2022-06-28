@@ -354,8 +354,7 @@ def get_learning_rate_scheduler(optimizer):
         else:
             warmup_steps = args.lr_warmup_samples
     else:
-        raise Exception(
-            'either train-iters or train-samples should be provided.')
+        return None
 
     lr_scheduler = AnnealingLR(
         optimizer,

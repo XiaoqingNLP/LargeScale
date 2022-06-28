@@ -106,14 +106,11 @@ def model_provider(pre_process=True, post_process=True, model_type='multiple_cho
 
 def process_batch(batch, args):
     """Process batch and produce inputs for the model."""
-    keys = ["text", "label", "mask", "position"]
+    keys = ["text", "label", "attention_mask", "position"]
     if args.cloze_eval:
-        if args.fast_decode:
-            keys += ["dec_text", "dec_position", "dec_mask", "dec_target", "dec_logit_mask"]
-        else:
-            keys += ["target", "loss_mask"]
-            if args.continuous_prompt:
-                keys += ["prompt_pos"]
+        keys += ["target", "loss_mask"]
+        if args.continuous_prompt:
+            keys += ["prompt_pos"]
     if args.variable_num_choices:
         keys.append("choice_mask")
     # Broadcast data.
@@ -134,7 +131,6 @@ def finetune_forward_step(batch, model):
     args = get_args()
     timers = get_timers()
 
-    breakpoint()
     # Get the batch.
     timers('batch generator').start()
     try:
@@ -148,25 +144,18 @@ def finetune_forward_step(batch, model):
     # Forward model.
     if args.cloze_eval:
         tokens, labels, position_ids = data['text'], data['label'], data['position']
-        attention_mask = data['mask']
+        attention_mask = data['attention_mask']
 
-        if not args.fast_decode:
-            target_ids, logit_mask = data['target'], data['loss_mask']
-            if args.continuous_prompt:
-                prompt_pos = data["prompt_pos"]
-                result = model(tokens, position_ids, attention_mask, target_ids, logit_mask, prompt_pos=prompt_pos)
-            else:
-                result = model(tokens, position_ids, attention_mask, target_ids, logit_mask)
-            if not args.multi_token:
-                logits, lm_logits = result
-            else:
-                logits = result
+        target_ids, logit_mask = data['target'], data['loss_mask']
+        if args.continuous_prompt:
+            prompt_pos = data["prompt_pos"]
+            result = model(tokens, position_ids, attention_mask, target_ids, logit_mask, prompt_pos=prompt_pos)
         else:
-            dec_input_ids, dec_position_ids, dec_attention_mask = data['dec_text'], data['dec_position'], data[
-                'dec_mask']
-            dec_target_ids, dec_logit_mask = data['dec_target'], data['dec_logit_mask']
-            logits = model(tokens, position_ids, attention_mask, dec_input_ids, dec_position_ids,
-                                  dec_attention_mask, dec_target_ids, dec_logit_mask)
+            result = model(tokens, position_ids, attention_mask, target_ids, logit_mask)
+        if not args.multi_token:
+            logits, lm_logits = result
+        else:
+            logits = result
     else:
         tokens, labels, position_ids, attention_mask = data['text'], data['label'], data['position'], data['mask']
         logits = model(tokens, position_ids, attention_mask)
@@ -336,7 +325,6 @@ def main():
     args.pretrained_bert = False
     args.segment_length = 0
     args.continuous_prompt = False
-    args.fast_decode = False
     args.num_prompt_tokens = 0
     args.task_mask = False
     args.prefix_prompt = False
