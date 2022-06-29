@@ -310,7 +310,6 @@ class GLMPreprocessor:
                     position_ids = self._build_relative_pos_encoding(position_ids, division)
                 elif self.no_2d_encoding:
                     position_ids = np.arange(len(tokens), dtype=np.int)
-                    position_ids[-len(target_tokens):] = position_ids[-(len(target_tokens) + 1):-1]
                 # attention_mask = self.build_mask_matrix(division, self.max_seq_length)
                 division = np.array([division], dtype=np.int)
                 sequences.append((tokens, targets, loss_masks, position_ids, division))
@@ -336,8 +335,8 @@ class GLMPreprocessor:
         if self.relative_pos_encoding:
             position_ids = self._build_relative_pos_encoding(position_ids, division)
         elif self.no_2d_encoding:
-            position_ids = np.arange(len(tokens), dtype=np.int)
-            position_ids[-(len(target) + 1):] = position_ids[-(len(target) + 2):-1]
+            position_ids = np.arange(len(tokens), dtype=dtype)
+            position_ids[len(text) + 1:] = len(text)
         # attention_mask = self.build_mask_matrix(len(text) + 1, max_seq_length)
         return tokens, targets, loss_masks, position_ids, np.array([division], dtype=dtype)
 
