@@ -336,7 +336,6 @@ class GLMPreprocessor:
             position_ids = self._build_relative_pos_encoding(position_ids, division)
         elif self.no_2d_encoding:
             position_ids = np.arange(len(tokens), dtype=dtype)
-            position_ids[len(text) + 1:] = len(text)
         # attention_mask = self.build_mask_matrix(len(text) + 1, max_seq_length)
         return tokens, targets, loss_masks, position_ids, np.array([division], dtype=dtype)
 
