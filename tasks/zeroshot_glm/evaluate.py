@@ -3,18 +3,19 @@
 import os
 import glob
 import json
+import time
 import torch
 import numpy as np
 
 from megatron import get_args, get_tokenizer
-from megatron import print_rank_0, is_last_rank
+from megatron import print_rank_0
 from megatron import mpu
 from megatron.checkpointing import load_checkpoint
 from megatron.training import get_model
 from megatron.utils import unwrap_model, report_memory
 from megatron.p2p_communication import recv_forward, send_forward
 
-from .dataset.mmlu import build_dataset
+from .datasets import build_dataset
 
 # These are needed to unwrap the model, would be nice to put these in megatron.utils if possible?
 from torch.nn.parallel.distributed import DistributedDataParallel as torchDDP
@@ -22,7 +23,6 @@ from megatron.model.distributed import DistributedDataParallel as LocalDDP
 from megatron.model.module import Float16Module
 
 from pretrain_glm import model_provider as glm_model_provider
-from pretrain_glm import process_data
 
 
 def get_model_provider():
@@ -38,17 +38,24 @@ def get_model_provider():
     return model_provider
 
 
+def process_data(batch):
+    return (
+        batch['tokens'].to(device=torch.cuda.current_device()).long(),
+        batch['targets'].to(device=torch.cuda.current_device()).long(),
+        batch['position_ids'].to(device=torch.cuda.current_device()).long(),
+        batch['attention_mask'].to(device=torch.cuda.current_device()).bool().unsqueeze(1)
+    )
+
+
 def forward_step(batch, model):
     """Forward step."""
 
     # Get the batch.
-    tokens, labels, loss_mask, attention_mask, position_ids = process_data(
-        batch)
+    tokens, targets, position_ids, attention_mask = process_data(batch)
 
     # Tell the model what our actual batch size will be
     args = get_args()
-    args.micro_batch_size = len(labels)
-    args.seq_length = tokens.size(1)
+    args.micro_batch_size, args.seq_length = tokens.shape[:2]
     assert args.micro_batch_size == 1
 
     input_tensor = recv_forward()
@@ -62,24 +69,38 @@ def forward_step(batch, model):
     send_forward(output)
 
     if mpu.is_pipeline_last_stage():
-
         output = mpu.gather_from_tensor_model_parallel_region(output)
         # output: [b, sq, vocab]
         output = torch.nn.functional.log_softmax(output, dim=-1)
-        target_ids = batch['target_id'][0]
+        batch_ids = torch.arange(tokens.size(0), dtype=tokens.dtype, device=tokens.device).unsqueeze(1)
 
-        # tokenizer = get_tokenizer()
-        # def decode(seq):
-        #     return ' '.join([tokenizer.IdToToken(idx.item()) for idx in seq])
-        #
-        # print(f'tokens: {decode(tokens[0, target_ids])}')
-        # print(f'label: {decode(labels[0, target_ids])}')
+        choice_logits = []
 
-        target_vocab = [20167, 20333, 20251, 20416]  # labels[0, target_ids]
-        logits = output[0, target_ids, target_vocab]
-        # print(logits.tolist())
+        # Single token
+        if batch['is_single_token'].any():
+            target_ids = batch['choice_target_ids'][0]
+            logits = output[batch_ids, target_ids, batch['choices']]
+            choice_logits.append(logits.squeeze(0).tolist())
+            # if mpu.get_tensor_model_parallel_rank() == 0:
+            #     for target_ids in batch['choice_target_ids']:
+            #         print(output[batch_ids, target_ids, target_vocab].squeeze(0).tolist())
+            #     print("-------")
+        # Multi token
+        else:
+            for target_ids in batch['choice_target_ids']:
+                logits = output[batch_ids, target_ids, targets[batch_ids, target_ids]]
+                choice_logits.append(logits.squeeze(0).sum(dim=-1).tolist())
 
-        return logits.tolist()
+        # if torch.distributed.get_rank() == 0:
+        #     tokenizer = get_tokenizer()
+        #     import pdb
+        #     pdb.set_trace()
+
+        # if mpu.get_tensor_model_parallel_rank() == 0:
+        #     print(choice_logits)
+        # print(choice_logits)
+
+        return choice_logits
 
     return None
 
@@ -139,42 +160,42 @@ def main():
     assert len(model) == 1, "Above condition should have caught this"
     model = model[0]
 
-    # print(model)
-
     datasets = []
     dataloaders = []
-    folders = []
     filenames = []
 
     for data in args.train_data:
-        for file_name in sorted(glob.glob(os.path.join(data, "./**/*.json"), recursive=True)):
+        for file_name in sorted(glob.glob(os.path.join(data, "./**/*.json*"), recursive=True)):
             if file_name.endswith("_predict.json"):
                 continue
             dataset = build_dataset(file_name)
             dataloader = build_data_loader(dataset, args.micro_batch_size,
                                            args.num_workers, drop_last=False)
-            folder = os.path.dirname(file_name)
             datasets.append(dataset)
             dataloaders.append(dataloader)
-            folders.append(folder)
             filenames.append(file_name)
             print_rank_0(f"Loaded {file_name}")
 
     report_memory("Before train")
 
-
-    for i in range(len(dataloaders)):
-        outputs = evaluate(dataloaders[i], model)
-        answer = datasets[i].answer
-        if mpu.is_pipeline_last_stage() and mpu.get_tensor_model_parallel_rank() == 0:
-            count = 0
-            with open(f"{filenames[i].replace('.json', '')}_predict.json", 'w') as file:
-                for idx, output in enumerate(outputs):
-                    predict = chr(ord('A') + np.argmax(np.array(output)))
-                    file.write(json.dumps({'predict': predict}) + '\n')
-                    count += predict == answer[idx]
-            print(f"Finish {filenames[i]}, accuracy = {count / len(answer) * 100:.3f}%")
-
+    start = time.time()
     torch.distributed.barrier()
 
-    print_rank_0('done :-)')
+    accuracys = []
+    for i in range(len(dataloaders)):
+        outputs = evaluate(dataloaders[i], model)
+        if mpu.is_pipeline_last_stage() and mpu.get_tensor_model_parallel_rank() == 0:
+            correct_num, all_num = 0, 0
+            with open(f"{filenames[i].replace('.json', '')}_predict.json", 'w') as file:
+                for item, output in zip(datasets[i].data, outputs):
+                    file.write(json.dumps({'predict': output}) + '\n')
+                    correct_num += item['label'] == np.argmax(output)
+            accuracy = correct_num / len(datasets[i])
+            accuracys.append(accuracy)
+            print(f"Finish {filenames[i]}, accuracy = {accuracy * 100:.3f}%")
+
+    if mpu.is_pipeline_last_stage() and mpu.get_tensor_model_parallel_rank() == 0:
+        print("Average accuracy:", np.mean(accuracys))
+
+    torch.distributed.barrier()
+    print_rank_0(f'done :-), total time: {time.time() - start}')
