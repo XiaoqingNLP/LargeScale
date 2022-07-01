@@ -86,6 +86,7 @@ def build_train_valid_test_datasets(
         relative_pos_encoding=args.position_embedding_type == PositionEmbeddingType.alibi,
         no_2d_encoding=args.position_embedding_type == PositionEmbeddingType.rotary and not args.rotary_embedding_2d,
         aggregate_gpt_sample=args.aggregate_gpt_sample,
+        adaptive_multitask_encoding=args.adaptive_multitask_encoding,
         rank=0,
         device_num=1,
     )

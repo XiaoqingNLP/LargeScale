@@ -991,6 +991,8 @@ def _add_data_args(parser):
                        help="Ratio of multitask training data")
     group.add_argument('--greedily-aggregate-multitask', action='store_true',
                        help='Aggregate multitask samples greedily to max sequence length')
+    group.add_argument('--adaptive-multitask-encoding', action='store_true',
+                       help='Use adaptive multitask encoding for multitask data')
 
     return parser
 

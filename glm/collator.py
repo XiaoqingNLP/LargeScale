@@ -24,6 +24,7 @@ class GLMPreprocessor:
             relative_pos_encoding,
             no_2d_encoding,
             aggregate_gpt_sample,
+            adaptive_multitask_encoding,
             rank,
             device_num,
     ):
@@ -47,6 +48,7 @@ class GLMPreprocessor:
         self.relative_pos_encoding = relative_pos_encoding
         self.no_2d_encoding = no_2d_encoding
         self.aggregate_gpt_sample = aggregate_gpt_sample
+        self.adaptive_multitask_encoding = adaptive_multitask_encoding
         self.count = 0
         self.rank = rank
         self.device_num = device_num
@@ -336,6 +338,8 @@ class GLMPreprocessor:
             position_ids = self._build_relative_pos_encoding(position_ids, division)
         elif self.no_2d_encoding:
             position_ids = np.arange(len(tokens), dtype=dtype)
+            if self.adaptive_multitask_encoding and len(target) < 2 * self.average_block_length:
+                position_ids[len(text) + 1:] = len(text)
         # attention_mask = self.build_mask_matrix(len(text) + 1, max_seq_length)
         return tokens, targets, loss_masks, position_ids, np.array([division], dtype=dtype)
 
