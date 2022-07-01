@@ -167,7 +167,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
     print_rank_0('> building train, validation, and test datasets for GPT ...')
     # Option 1 of data loading using --data-path
 
-    if args.data_path:
+    if args.data_path or args.multitask_data_path:
         train_ds, valid_ds, test_ds = build_train_valid_test_datasets(
             data_prefix=args.data_path,
             splits_string=args.split,

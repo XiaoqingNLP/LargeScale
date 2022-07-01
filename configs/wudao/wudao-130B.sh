@@ -41,7 +41,7 @@ OPTIMIZER_ARGS=" \
     --adam-beta2 0.95 \
     --adam-eps 1e-8 \
     --lr 4e-5 \
-    --min-lr 8e-6 \
+    --min-lr 4e-6 \
     --override-lr-scheduler \
     --lr-decay-style cosine \
     --lr-decay-samples $LR_DECAY_SAMPLES \
@@ -105,7 +105,7 @@ gpt_options=" \
        --multitask-ratio 0.05 \
        --num-workers 1 \
        --data-path $DATA_PATH \
-       --skip-train-iteration-range 40701-40900 \
+       --skip-train-iteration-range 40701-40900 42401-42600 \
        --save $CHECKPOINT_PATH \
        --load $CHECKPOINT_PATH \
        --abort-on-unmet-fused-kernel-constraints \
@@ -120,7 +120,6 @@ gpt_options=" \
        $DEEPSPEED_ARGS \
        $OUTPUT_ARGS
 "
-#       --lr-auto-warmup-steps 22800 2000 \
 #       --multitask-data-transform-steps 22850 2000 \
 #       --shrink-embedding-gradient-steps 22850 6000 \
 
