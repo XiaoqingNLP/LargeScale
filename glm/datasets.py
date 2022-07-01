@@ -233,6 +233,38 @@ class AggregatedDataset(Dataset):
                     for offset in range(self.aggregated_sample_num)])
 
 
+class RandomGreedilyAggregatedDataset(Dataset):
+    '''
+    Random dataset aggregated dataset with greedy concat strategy
+    '''
+    def __init__(self, ds, max_seq_length, process_fn, seed=None):
+        self.wrapped_data = ds
+        self.max_seq_length = max_seq_length
+        self.process_fn = process_fn
+        self.seed = random.Random(seed).randint(0, 2**32-1) if seed is not None else 0
+
+    def __len__(self):
+        return len(self.wrapped_data)
+
+    def __getitem__(self, index):
+        rng = random.Random(index)
+        rng = np.random.RandomState(seed=[self.seed ^ rng.randint(0, 2 ** 32 - 1) for _ in range(16)])
+        items, length = [], 0
+
+        while True:
+            index = rng.randint(len(self.wrapped_data))
+            item = self.wrapped_data[index]
+            new_length = len(item[0]) + len(item[1]) + 2
+            if length + new_length > self.max_seq_length:
+                if length == 0:  # only one example, so we must append it then truncate
+                    items.append(item)
+                break
+            length += new_length
+            items.append(item)
+
+        return self.process_fn(items)
+
+
 def split_ds(ds, split=[.8,.2,.0], block_size = 10000, seed=1130):
     """
     Split a dataset into subsets given proportions of how
