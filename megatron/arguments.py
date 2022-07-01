@@ -333,7 +333,7 @@ def parse_args(extra_args_provider=None, defaults={},
         args.lr_auto_warmup_steps = None
 
     if args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence:
-        assert args.micro_batch_size == 1
+        assert args.finetune or args.micro_batch_size == 1
 
     _print_args(args)
     return args
