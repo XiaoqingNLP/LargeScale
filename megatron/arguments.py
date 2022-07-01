@@ -101,7 +101,7 @@ def parse_args(extra_args_provider=None, defaults={},
             "and Mode 2: --(train|valid|test)-weighted-split-paths"\
             "are mutually exclusive i.e. cannot be set together."
 
-    if args.data_path:
+    if args.data_path or args.multitask_data_path:
         assert args.train_weighted_split_paths is None, message
         setattr(args, "valid_weighted_split_names", None)
         setattr(args, "valid_weighted_split_weights", None)
@@ -331,6 +331,9 @@ def parse_args(extra_args_provider=None, defaults={},
         args.lr_auto_warmup_steps[1] = int(args.lr_auto_warmup_steps[1])
     else:
         args.lr_auto_warmup_steps = None
+
+    if args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence:
+        assert args.micro_batch_size == 1
 
     _print_args(args)
     return args
@@ -986,6 +989,8 @@ def _add_data_args(parser):
                        help="Multitask data paths")
     group.add_argument("--multitask-ratio", type=float, default=0.05,
                        help="Ratio of multitask training data")
+    group.add_argument('--greedily-aggregate-multitask', action='store_true',
+                       help='Aggregate multitask samples greedily to max sequence length')
 
     return parser
 

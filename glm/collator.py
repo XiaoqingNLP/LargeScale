@@ -314,8 +314,8 @@ class GLMPreprocessor:
                 division = np.array([division], dtype=np.int)
                 sequences.append((tokens, targets, loss_masks, position_ids, division))
             return *self._pack_samples(sequences), 1
-    def _get_single_multitask_data(self, text, target):
-        max_seq_length = self.max_seq_length // self.aggregated_samples_per_sequence
+
+    def _get_single_multitask_data(self, text, target, max_seq_length):
         if len(text) + len(target) + 2 > max_seq_length:
             text_length = max(int(0.25 * max_seq_length), max_seq_length - len(target) - 2)
             text = text[:text_length]
@@ -330,7 +330,7 @@ class GLMPreprocessor:
         block_position_ids = np.concatenate((np.zeros(len(text), dtype=dtype), np.arange(len(target) + 2, dtype=dtype)))
         position_ids = np.stack([position_ids, block_position_ids])
         tokens, targets, loss_masks, position_ids = self.pad_batch(tokens, targets, loss_masks, position_ids,
-                                                                   max_seq_length=self.max_seq_length // self.aggregated_samples_per_sequence)
+                                                                   max_seq_length=max_seq_length)
         division = len(text) + 1
         if self.relative_pos_encoding:
             position_ids = self._build_relative_pos_encoding(position_ids, division)
@@ -344,11 +344,22 @@ class GLMPreprocessor:
             assert self.max_seq_length % self.aggregated_samples_per_sequence == 0
             sequences = []
             for text, target in zip(texts, targets):
-                data = self._get_single_multitask_data(text, target)
+                data = self._get_single_multitask_data(text, target, self.max_seq_length // self.aggregated_samples_per_sequence)
                 sequences.append(data)
             return self._pack_samples(sequences)
         else:
-            return self._get_single_multitask_data(texts[0], targets[0])
+            return self._get_single_multitask_data(texts[0], targets[0], self.max_seq_length)
+
+    def get_greedily_aggregated_multitask_data(self, texts, targets):
+        sequences, length = [], 0
+        for idx, (text, target) in enumerate(zip(texts, targets)):
+            cur_length = self.max_seq_length - length if idx + 1 == len(texts) else len(text) + len(target) + 2
+            tokens, targets, loss_masks, position_ids, division = \
+                self._get_single_multitask_data(text, target, max_seq_length=cur_length)
+            division  = np.array([division, [cur_length]], dtype=np.long)
+            sequences.append((tokens, targets, loss_masks, position_ids, division))
+            length += cur_length
+        return self._pack_samples(sequences)
 
 
 def debug_block_data(data):

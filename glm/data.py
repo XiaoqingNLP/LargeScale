@@ -4,12 +4,12 @@ import os
 
 from megatron.enums import PositionEmbeddingType
 from .datasets import BinaryDataset, RandomMappingDataset, LMDBDataset, ConcatDataset, AggregatedDataset, split_ds
-from .datasets import TransformingDataset
+from .datasets import TransformingDataset, RandomGreedilyAggregatedDataset
 from .collator import GLMPreprocessor
 from megatron import get_tokenizer, print_rank_0, get_num_microbatches
 from megatron.mpu import get_tensor_model_parallel_rank, is_pipeline_first_stage
 
-def get_input(tokens, targets, loss_masks, position_ids, division, task_type=False):
+def get_input(tokens, targets, loss_masks, position_ids, division, task_type=0):
     return {
         "text": torch.tensor(tokens, dtype=torch.long),
         "target": torch.tensor(targets, dtype=torch.long),
@@ -20,7 +20,7 @@ def get_input(tokens, targets, loss_masks, position_ids, division, task_type=Fal
     }
 
 
-def get_multitask_data(mutlitask_data_path, collator: GLMPreprocessor, aggregated_samples_per_sequence=1):
+def get_multitask_data(mutlitask_data_path, collator: GLMPreprocessor, args):
     train_datasets, val_datasets = [], []
     for path in sorted(os.listdir(mutlitask_data_path)):
         full_path = os.path.join(mutlitask_data_path, path)
@@ -32,15 +32,23 @@ def get_multitask_data(mutlitask_data_path, collator: GLMPreprocessor, aggregate
             else:
                 train_datasets.append(data)
 
+    collator_fn = collator.get_greedily_aggregated_multitask_data if args.greedily_aggregate_multitask else \
+            collator.get_multitask_data
+
     def process_fn(samples):
         # unpack List[(token, label)] to -> (List[tokens], List[labels])
-        return get_input(*collator.get_multitask_data(*list(zip(*samples))), task_type=2)
+        return get_input(*collator_fn(*list(zip(*samples))), task_type=2)
 
     # We need a random mapping here or will lose some task when multitask_ratio < actual data ratio
-    train_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(train_datasets)),
-                                       aggregated_samples_per_sequence, process_fn)
-    val_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(val_datasets)),
-                                     aggregated_samples_per_sequence, process_fn) if len(val_datasets) > 0 else []
+    if args.greedily_aggregate_multitask:
+        train_datasets = RandomGreedilyAggregatedDataset(ConcatDataset(train_datasets), args.seq_length, process_fn)
+        val_datasets = RandomGreedilyAggregatedDataset(ConcatDataset(val_datasets),
+                        args.seq_length, process_fn) if len(val_datasets) > 0 else []
+    else:
+        train_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(train_datasets)),
+                                           args.aggregated_samples_per_sequence, process_fn)
+        val_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(val_datasets)),
+                                         args.aggregated_samples_per_sequence, process_fn) if len(val_datasets) > 0 else []
     return train_datasets, val_datasets
 
 
@@ -82,28 +90,29 @@ def build_train_valid_test_datasets(
         device_num=1,
     )
 
-    dataset = BinaryDataset(
-        f"{data_prefix[0]}.bin",
-        lambda tokens, index: get_input(*collator.get_input_data(np.array(tokens), index)),  # np.memmap -> np.array
-        length_per_sample=length_per_sample,
-    )
-    train_dataset, valid_dataset, test_dataset = split_ds(
-        dataset, [float(s) for s in splits_string.split(",")], block_size=10000
-    )
-    print_rank_0(
-        f"    text_train: {len(train_dataset)}, text_valid: {len(valid_dataset)}, text_test: {len(test_dataset)}"
-    )
+    if data_prefix is not None:
+        dataset = BinaryDataset(
+            f"{data_prefix[0]}.bin",
+            lambda tokens, index: get_input(*collator.get_input_data(np.array(tokens), index)),  # np.memmap -> np.array
+            length_per_sample=length_per_sample,
+        )
+        train_dataset, valid_dataset, test_dataset = split_ds(
+            dataset, [float(s) for s in splits_string.split(",")], block_size=10000
+        )
+        print_rank_0(
+            f"    text_train: {len(train_dataset)}, text_valid: {len(valid_dataset)}, text_test: {len(test_dataset)}"
+        )
 
     if args.multitask_data_path is not None:
         if len(args.multitask_data_path) == 1:
             multitask_train_dataset, multitask_valid_dataset = \
-                get_multitask_data(args.multitask_data_path[0], collator, aggregated_samples_per_sequence)
+                get_multitask_data(args.multitask_data_path[0], collator, args)
             print_rank_0(f"    multitask_train: {len(multitask_train_dataset)}, multitask_valid: {len(multitask_valid_dataset)}")
         elif len(args.multitask_data_path) == 2:
             multitask_train_dataset1, multitask_valid_dataset1 = \
-                get_multitask_data(args.multitask_data_path[0], collator, aggregated_samples_per_sequence)
+                get_multitask_data(args.multitask_data_path[0], collator, args)
             multitask_train_dataset2, multitask_valid_dataset2 = \
-                get_multitask_data(args.multitask_data_path[1], collator, aggregated_samples_per_sequence)
+                get_multitask_data(args.multitask_data_path[1], collator, args)
             print_rank_0(f"    multitask_train1: {len(multitask_train_dataset1)}, multitask_valid1: {len(multitask_valid_dataset1)}")
             print_rank_0(f"    multitask_train2: {len(multitask_train_dataset2)}, multitask_valid2: {len(multitask_valid_dataset2)}")
             multitask_train_dataset = make_transforming_dataset(args, multitask_train_dataset1, multitask_train_dataset2)
@@ -114,11 +123,19 @@ def build_train_valid_test_datasets(
         def calc_weight(ds1, ds2, ratio):
             return [1, 1] if ratio is None else [1, ratio * len(ds1) / (len(ds2) * (1 - ratio))]
 
-        train_dataset = ConcatDataset([train_dataset, multitask_train_dataset],
-                                      weights=calc_weight(train_dataset, multitask_train_dataset, args.multitask_ratio))
-        if len(multitask_valid_dataset) > 0:
-            valid_dataset = ConcatDataset([valid_dataset, multitask_valid_dataset],
-                                          weights=calc_weight(valid_dataset, multitask_valid_dataset, args.multitask_ratio))
+        if data_prefix is not None:
+            train_dataset = ConcatDataset([train_dataset, multitask_train_dataset],
+                                          weights=calc_weight(train_dataset, multitask_train_dataset, args.multitask_ratio))
+            if len(multitask_valid_dataset) > 0:
+                valid_dataset = ConcatDataset([valid_dataset, multitask_valid_dataset],
+                                              weights=calc_weight(valid_dataset, multitask_valid_dataset, args.multitask_ratio))
+        else:
+            train_dataset = multitask_train_dataset
+            valid_dataset = multitask_valid_dataset
+            if len(valid_dataset) == 0:
+                print_rank_0("No validation multitask dataset found, set it to multitask train dataset")
+                valid_dataset = train_dataset
+            test_dataset = valid_dataset
 
     scale = max(200, 1 + train_valid_test_num_samples[0] // len(train_dataset))
     train_dataset = RandomMappingDataset(train_dataset, scale=scale, seed=args.data_shuffle_seed)
@@ -160,9 +177,10 @@ def build_single_mask_matrix(separator, batch_size, seq_length, memory_length=0)
 
 
 def build_mask_matrix(separator, batch_size, seq_length):
+    print_rank_0(separator)
     if separator.dim() == 1:
         return build_single_mask_matrix(separator, batch_size=batch_size, seq_length=seq_length)
-    else:
+    elif separator.dim() == 2:
         aggregated_samples = separator.size(-1)
         assert seq_length % aggregated_samples == 0
         single_length = seq_length // aggregated_samples
@@ -171,6 +189,19 @@ def build_mask_matrix(separator, batch_size, seq_length):
             single_mask = build_single_mask_matrix(separator[:, i], batch_size=batch_size, seq_length=single_length)
             m[:, :, single_length * i: single_length * (i + 1), single_length * i: single_length * (i + 1)] = single_mask
         return m
+    elif separator.dim() == 3:
+        assert batch_size == 1, "Only support micro_batch_size = 1"
+        aggregated_samples = separator.size(-1)
+        m = torch.ones((batch_size, 1, seq_length, seq_length), dtype=torch.bool, device=separator.device)
+        length = 0
+        for i in range(aggregated_samples):
+            current_length = separator[0, 1, i]
+            single_mask = build_single_mask_matrix(separator[:, 0, i], batch_size=batch_size, seq_length=current_length)
+            m[:, :, length: length + current_length, length: length + current_length] = single_mask
+            length += current_length
+        return m
+    else:
+        raise NotImplementedError
 
 
 if __name__ == "__main__":
