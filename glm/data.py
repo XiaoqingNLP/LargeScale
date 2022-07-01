@@ -41,10 +41,12 @@ def get_multitask_data(mutlitask_data_path, collator: GLMPreprocessor, args):
 
     # We need a random mapping here or will lose some task when multitask_ratio < actual data ratio
     if args.greedily_aggregate_multitask:
+        print_rank_0("Use greedily aggregate strategy for multitask data")
         train_datasets = RandomGreedilyAggregatedDataset(ConcatDataset(train_datasets), args.seq_length, process_fn)
         val_datasets = RandomGreedilyAggregatedDataset(ConcatDataset(val_datasets),
                         args.seq_length, process_fn) if len(val_datasets) > 0 else []
     else:
+        print_rank_0(f"Use fixed aggregate={args.aggregated_samples_per_sequence} strategy for multitask data")
         train_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(train_datasets)),
                                            args.aggregated_samples_per_sequence, process_fn)
         val_datasets = AggregatedDataset(RandomMappingDataset(ConcatDataset(val_datasets)),
@@ -87,6 +89,7 @@ def build_train_valid_test_datasets(
         no_2d_encoding=args.position_embedding_type == PositionEmbeddingType.rotary and not args.rotary_embedding_2d,
         aggregate_gpt_sample=args.aggregate_gpt_sample,
         adaptive_multitask_encoding=args.adaptive_multitask_encoding,
+        adaptive_multitask_encoding_length=args.adaptive_multitask_encoding_length,
         rank=0,
         device_num=1,
     )

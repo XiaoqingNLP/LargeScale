@@ -272,8 +272,11 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
     load_dir = getattr(args, load_arg)
 
     if args.deepspeed:
-        load_optimizer_states = False if args.no_load_optim else True
-        loaded_dir, state_dict = model[0].load_checkpoint(load_dir, load_optimizer_states=load_optimizer_states)
+        load_optimizer_states = False if args.no_load_optim or args.load_deepspeed_model_only else True
+        load_lr_scheduler_states = False if args.load_deepspeed_model_only else True
+        loaded_dir, state_dict = model[0].load_checkpoint(load_dir,
+                                                          load_optimizer_states=load_optimizer_states,
+                                                          load_lr_scheduler_states=load_lr_scheduler_states)
         if loaded_dir is None:
             print_rank_0('WARNING: could not find the metadata file {} '.format(
                 load_dir))
@@ -281,6 +284,10 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
                         'random')
             return 0
         release = False
+
+        if args.load_deepspeed_model_only:
+            print_rank_0("Successfully load DeepSpeed model with --load_deepspeed_model_only")
+            return 0
     else:
         model = utils.unwrap_model(model)
 
