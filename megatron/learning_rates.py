@@ -72,6 +72,21 @@ class AnnealingLR(object):
             if self.num_steps == self.warmup_steps and \
                 self.decay_tokens is not None:
                 self.warmup_tokens = self.num_tokens
+
+            args = get_args()
+            iteration = args.iteration if hasattr(args, 'iteration') else 0
+            if (
+                self.lr_auto_warmup_steps is not None
+                and self.lr_auto_warmup_steps[0] <= iteration <
+                self.lr_auto_warmup_steps[0] + self.lr_auto_warmup_steps[1]
+            ):
+                return max(
+                    1e-8,
+                    self.max_lr * float(self.num_steps) / float(self.warmup_steps) \
+                    * (iteration - self.lr_auto_warmup_steps[0])
+                    / self.lr_auto_warmup_steps[1],
+                )
+
             return self.max_lr * float(self.num_steps) / \
                 float(self.warmup_steps)
 
