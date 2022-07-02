@@ -286,6 +286,7 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
         release = False
 
         if args.load_deepspeed_model_only:
+            model[0].global_steps = 0
             print_rank_0("Successfully load DeepSpeed model with --load_deepspeed_model_only")
             return 0
     else:
@@ -362,6 +363,9 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
                              'iteration from checkpoint {}, exiting'.format(
                                  checkpoint_name))
                 sys.exit()
+
+    if args.deepspeed:
+        model[0].global_steps = iteration
 
     # Check arguments.
     assert args.consumed_train_samples == 0
