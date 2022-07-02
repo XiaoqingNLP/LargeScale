@@ -287,6 +287,7 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
 
         if args.load_deepspeed_model_only:
             model[0].global_steps = 0
+            model[0].skipped_steps = 0
             print_rank_0("Successfully load DeepSpeed model with --load_deepspeed_model_only")
             return 0
     else:
