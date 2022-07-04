@@ -352,6 +352,8 @@ class GLMPreprocessor:
             elif self.unified_multitask_encoding:
                 position_ids = np.concatenate((np.arange(len(text) + 1, dtype=dtype),
                                          np.arange(len(text), len(text) + len(target) + 1, dtype=dtype)))
+                position_ids = np.concatenate((position_ids,
+                                        np.zeros(max_seq_length - len(position_ids), dtype=dtype)))
         # attention_mask = self.build_mask_matrix(len(text) + 1, max_seq_length)
         return tokens, targets, loss_masks, position_ids, np.array([division], dtype=dtype)
 
