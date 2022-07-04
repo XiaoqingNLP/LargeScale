@@ -26,6 +26,7 @@ class GLMPreprocessor:
             aggregate_gpt_sample,
             adaptive_multitask_encoding,
             adaptive_multitask_encoding_length,
+            unified_multitask_encoding,
             rank,
             device_num,
     ):
@@ -53,6 +54,7 @@ class GLMPreprocessor:
         self.adaptive_length_distribution = 1 - np.array([
             poisson.cdf(i, adaptive_multitask_encoding_length) for i in range(1, 40)
         ])
+        self.unified_multitask_encoding = unified_multitask_encoding
         self.count = 0
         self.rank = rank
         self.device_num = device_num
@@ -347,6 +349,9 @@ class GLMPreprocessor:
                 if len(target) < len(self.adaptive_length_distribution) \
                         and rng.random() < self.adaptive_length_distribution[len(target)]:
                     position_ids[len(text) + 1:] = len(text)
+            elif self.unified_multitask_encoding:
+                position_ids = np.concatenate((np.arange(len(text) + 1, dtype=dtype),
+                                         np.arange(len(text), len(text) + len(target) + 1, dtype=dtype)))
         # attention_mask = self.build_mask_matrix(len(text) + 1, max_seq_length)
         return tokens, targets, loss_masks, position_ids, np.array([division], dtype=dtype)
 

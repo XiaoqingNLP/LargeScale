@@ -90,6 +90,7 @@ def build_train_valid_test_datasets(
         aggregate_gpt_sample=args.aggregate_gpt_sample,
         adaptive_multitask_encoding=args.adaptive_multitask_encoding,
         adaptive_multitask_encoding_length=args.adaptive_multitask_encoding_length,
+        unified_multitask_encoding=args.unified_multitask_encoding,
         rank=0,
         device_num=1,
     )
