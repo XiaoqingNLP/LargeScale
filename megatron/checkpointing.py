@@ -275,6 +275,7 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
         load_optimizer_states = False if args.no_load_optim or args.load_deepspeed_model_only else True
         load_lr_scheduler_states = False if args.load_deepspeed_model_only else True
         loaded_dir, state_dict = model[0].load_checkpoint(load_dir,
+                                                          load_module_only=args.load_deepspeed_model_only,
                                                           load_optimizer_states=load_optimizer_states,
                                                           load_lr_scheduler_states=load_lr_scheduler_states)
         if loaded_dir is None:
@@ -288,6 +289,7 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
         if args.load_deepspeed_model_only:
             model[0].global_steps = 0
             model[0].skipped_steps = 0
+            optimizer.refresh_fp32_params()
             print_rank_0("Successfully load DeepSpeed model with --load_deepspeed_model_only")
             return 0
     else:
