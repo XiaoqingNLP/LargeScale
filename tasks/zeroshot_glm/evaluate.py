@@ -56,7 +56,6 @@ def forward_step(batch, model):
     # Tell the model what our actual batch size will be
     args = get_args()
     args.micro_batch_size, args.seq_length = tokens.shape[:2]
-    assert args.micro_batch_size == 1
 
     input_tensor = recv_forward()
 
@@ -152,6 +151,8 @@ def main():
         print("Interleaved pipeline schedule is not yet supported for text generation.")
         exit()
 
+    assert args.micro_batch_size == 1
+
     # # Set up model and load checkpoint.
     model = get_model(get_model_provider())
     if args.load is not None:
@@ -182,20 +183,34 @@ def main():
     torch.distributed.barrier()
 
     accuracys = []
+    correct_all, sample_all = 0, 0
     for i in range(len(dataloaders)):
         outputs = evaluate(dataloaders[i], model)
         if mpu.is_pipeline_last_stage() and mpu.get_tensor_model_parallel_rank() == 0:
-            correct_num, all_num = 0, 0
-            with open(f"{filenames[i].replace('.json', '')}_predict.json", 'w') as file:
-                for item, output in zip(datasets[i].data, outputs):
-                    file.write(json.dumps({'predict': output}) + '\n')
-                    correct_num += item['label'] == np.argmax(output)
-            accuracy = correct_num / len(datasets[i])
-            accuracys.append(accuracy)
-            print(f"Finish {filenames[i]}, accuracy = {accuracy * 100:.3f}%")
+            world_size = mpu.get_data_parallel_world_size()
+            rank = mpu.get_data_parallel_rank()
+            # print(f"rank: {rank}, {len(datasets[i])} {len(outputs)}")
+            predicted_gathered = torch.tensor(np.zeros((len(datasets[i]) + world_size - 1) // world_size * world_size),
+                                              dtype=torch.int64, device=torch.cuda.current_device())
+            predicted_gathered[rank::world_size] = \
+                torch.tensor(np.argmax(outputs, axis=-1), dtype=torch.int64, device=torch.cuda.current_device()).squeeze(1)
+            torch.distributed.all_reduce(predicted_gathered, group=mpu.get_data_parallel_group())
+            predicted_gathered = predicted_gathered[:len(datasets[i])].tolist()
 
-    if mpu.is_pipeline_last_stage() and mpu.get_tensor_model_parallel_rank() == 0:
-        print("Average accuracy:", np.mean(accuracys))
+            if mpu.get_data_parallel_rank() == 0:
+                correct_num = 0
+                with open(f"{filenames[i].replace('.json', '')}_predict.json", 'w') as file:
+                    for item, output in zip(datasets[i].data, predicted_gathered):
+                        file.write(json.dumps({'predict': output}) + '\n')
+                        correct_num += item['label'] == output
+                accuracy = correct_num / len(datasets[i])
+                accuracys.append(accuracy)
+                print(f"Finish {filenames[i]}, accuracy = {accuracy * 100:.3f}%")
+                correct_all += correct_num
+                sample_all += len(datasets[i])
+
+    if mpu.is_pipeline_last_stage() and mpu.get_tensor_model_parallel_rank() == 0 and mpu.get_data_parallel_rank() == 0:
+        print("Micro accuracy:", correct_all / sample_all)
 
     torch.distributed.barrier()
     print_rank_0(f'done :-), total time: {time.time() - start}')
