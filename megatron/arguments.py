@@ -332,7 +332,7 @@ def parse_args(extra_args_provider=None, defaults={},
     else:
         args.lr_auto_warmup_steps = None
 
-    if args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence:
+    if not args.finetune and (args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence):
         assert args.micro_batch_size == 1
 
     if args.load_deepspeed_model_only:
