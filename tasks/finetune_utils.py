@@ -171,6 +171,9 @@ def _train(model, optimizer, lr_scheduler, forward_step,
     # Memory reporting flag.
     report_memory_flag = True
 
+    if end_of_epoch_callback is not None:
+        end_of_epoch_callback(model, 0)
+
     # For each remaining epoch
     timers('interval-time').start()
     for epoch in range(start_epoch, args.epochs):

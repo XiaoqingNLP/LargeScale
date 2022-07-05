@@ -152,7 +152,6 @@ def multichoice_evaluate(model, dataloader, example_dict, args):
                 tokens, labels_, position_ids, attention_mask = data['text'], data['label'], data['position'], data[
                     'mask']
                 inputs = [tokens, position_ids, attention_mask]
-            breakpoint()
             if len(inputs[0].shape) == 3 and inputs[0].size(1) > segment_length:
                 logit_list = []
                 for i in range((inputs[0].size(1) - 1) // segment_length + 1):

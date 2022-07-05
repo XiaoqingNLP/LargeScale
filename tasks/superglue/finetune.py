@@ -316,7 +316,7 @@ def main():
     args = get_args()
 
     assert args.glm, "Only support GLM for SuperGLUE"
-    assert args.tokenizer_type == "IceTokenizer", "Only support IceTokenzier for SuperGLUE"
+    assert args.tokenizer_type == "IceTokenizer", "Only support IceTokenizer for SuperGLUE"
     assert args.position_embedding_type != PositionEmbeddingType.alibi, "Don't support alibi for finetune"
 
     # For compability

@@ -178,7 +178,6 @@ def build_single_mask_matrix(separator, batch_size, seq_length, memory_length=0)
 
 
 def build_mask_matrix(separator, batch_size, seq_length):
-    print_rank_0(separator)
     if separator.dim() == 1:
         return build_single_mask_matrix(separator, batch_size=batch_size, seq_length=seq_length)
     elif separator.dim() == 2:

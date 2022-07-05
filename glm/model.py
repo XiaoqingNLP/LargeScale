@@ -68,8 +68,7 @@ class GLMForMultiTokenClozeFast(GLMForDownstream):
             outputs = torch.nn.functional.log_softmax(outputs, dim=-1)
         batch_size, seq_length, vocab_size = outputs.shape
         num_choices = target_ids.size(1)
-        outputs = outputs.unsqueeze(1).expand(-1, num_choices, -1, -1).reshape(batch_size * num_choices, seq_length,
-                                                                               vocab_size)
+        outputs = outputs.repeat_interleave(num_choices, dim=0)
         target_ids = target_ids.reshape(-1, target_ids.size(-1))
         logit_mask = logit_mask.reshape(-1, logit_mask.size(-1))
         logits = -vocab_parallel_cross_entropy(outputs, target_ids)
