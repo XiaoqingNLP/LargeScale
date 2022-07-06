@@ -25,6 +25,8 @@ class GLMPreprocessor:
             no_2d_encoding,
             aggregate_gpt_sample,
             adaptive_multitask_encoding,
+            adaptive_multitask_encoding_length,
+            unified_multitask_encoding,
             rank,
             device_num,
     ):
@@ -49,6 +51,10 @@ class GLMPreprocessor:
         self.no_2d_encoding = no_2d_encoding
         self.aggregate_gpt_sample = aggregate_gpt_sample
         self.adaptive_multitask_encoding = adaptive_multitask_encoding
+        self.adaptive_length_distribution = 1 - np.array([
+            poisson.cdf(i, adaptive_multitask_encoding_length) for i in range(1, 40)
+        ])
+        self.unified_multitask_encoding = unified_multitask_encoding
         self.count = 0
         self.rank = rank
         self.device_num = device_num
@@ -338,8 +344,16 @@ class GLMPreprocessor:
             position_ids = self._build_relative_pos_encoding(position_ids, division)
         elif self.no_2d_encoding:
             position_ids = np.arange(len(tokens), dtype=dtype)
-            if self.adaptive_multitask_encoding and len(target) < 2 * self.average_block_length:
-                position_ids[len(text) + 1:] = len(text)
+            if self.adaptive_multitask_encoding:
+                rng = random.Random(random.Random(np.sum(tokens) + np.sum(targets)).randint(0, 2 ** 32 - 1))
+                if len(target) < len(self.adaptive_length_distribution) \
+                        and rng.random() < self.adaptive_length_distribution[len(target)]:
+                    position_ids[len(text) + 1:] = len(text)
+            elif self.unified_multitask_encoding:
+                position_ids = np.concatenate((np.arange(len(text) + 1, dtype=dtype),
+                                         np.arange(len(text), len(text) + len(target) + 1, dtype=dtype)))
+                position_ids = np.concatenate((position_ids,
+                                        np.zeros(max_seq_length - len(position_ids), dtype=dtype)))
         # attention_mask = self.build_mask_matrix(len(text) + 1, max_seq_length)
         return tokens, targets, loss_masks, position_ids, np.array([division], dtype=dtype)
 

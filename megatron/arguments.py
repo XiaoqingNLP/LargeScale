@@ -335,6 +335,11 @@ def parse_args(extra_args_provider=None, defaults={},
     if args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence:
         assert args.finetune or args.micro_batch_size == 1
 
+    if args.load_deepspeed_model_only:
+        assert args.deepspeed
+
+    assert not (args.unified_multitask_encoding and args.adaptive_multitask_encoding)
+
     _print_args(args)
     return args
 
@@ -717,6 +722,8 @@ def _add_checkpointing_args(parser):
                        help='Do not load optimizer when loading checkpoint.')
     group.add_argument('--no-load-rng', action='store_true', default=None,
                        help='Do not load rng state when loading checkpoint.')
+    group.add_argument('--load-deepspeed-model-only', action='store_true', default=None,
+                       help='Load deepspeed model only, do not load args and start from iteration 0.')
     group.add_argument('--finetune', action='store_true',
                        help='Load model for finetuning. Do not load optimizer '
                        'or rng state from checkpoint and set iteration to 0. '
@@ -994,6 +1001,10 @@ def _add_data_args(parser):
                        help='Aggregate multitask samples greedily to max sequence length')
     group.add_argument('--adaptive-multitask-encoding', action='store_true',
                        help='Use adaptive multitask encoding for multitask data')
+    group.add_argument('--unified-multitask-encoding', action='store_true',
+                       help='Use unified multitask encoding for multitask data')
+    group.add_argument('--adaptive-multitask-encoding-length', type=float, default=5.0,
+                       help='Adaptive multitask encoding length')
 
     return parser
 
