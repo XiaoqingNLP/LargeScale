@@ -332,8 +332,8 @@ def parse_args(extra_args_provider=None, defaults={},
     else:
         args.lr_auto_warmup_steps = None
 
-    if not args.finetune and (args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence):
-        assert args.micro_batch_size == 1
+    if args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence:
+        assert args.finetune or args.micro_batch_size == 1
 
     if args.load_deepspeed_model_only:
         assert args.deepspeed
@@ -946,6 +946,7 @@ def _add_data_args(parser):
                             'They are used for span masking in the T5 model')
     group.add_argument('--seq-length', type=int, default=None,
                        help='Maximum sequence length to process.')
+    group.add_argument('--tgt-seq-length', type=int, default=16)
     group.add_argument('--encoder-seq-length', type=int, default=None,
                        help='Maximum encoder sequence length to process.'
                        'This should be exclusive of --seq-length')
@@ -1180,4 +1181,5 @@ def _add_glm_args(parser):
                             'multitask ds1 -> ds2 in [x1, x2)')
     group.add_argument('--rotary-embedding-2d', action='store_true',
                        help='If set, use 2D rotary embedding for GLM.')
+    group.add_argument('--fast-decode', action='store_true')
     return parser

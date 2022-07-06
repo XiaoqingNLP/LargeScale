@@ -4,15 +4,12 @@ from glm import build_mask_matrix
 from megatron.mpu import vocab_parallel_cross_entropy
 
 
-class GLMForMultiTokenCloze(torch.nn.Module):
-    def __init__(self, language_model, take_softmax=True, length_penalty=0.0):
-        super(GLMForMultiTokenCloze, self).__init__()
-        self.model = language_model
-        self.take_softmax = take_softmax
-        self.length_penalty = length_penalty
+class GLMForDownstream(torch.nn.Module):
+    def __init__(self, model=None, **kwargs):
+        super().__init__()
+        self.model = model
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
-        # [h.remove() for h in self.hook_handles]
         sd = self.model.state_dict(destination, prefix, keep_vars)
         return sd
 
@@ -22,9 +19,19 @@ class GLMForMultiTokenCloze(torch.nn.Module):
     def named_parameters(self, prefix: str = '', recurse: bool = True):
         return self.model.named_parameters(prefix=prefix, recurse=recurse)
 
+    def disable_untrainable_params(self):
+        self.model.disable_untrainable_params()
+
     def set_input_tensor(self, input_tensor):
         """See megatron.model.transformer.set_input_tensor()"""
         self.model.set_input_tensor(input_tensor)
+
+
+class GLMForMultiTokenCloze(GLMForDownstream):
+    def __init__(self, model, take_softmax=False, length_penalty=0.0):
+        super().__init__(model)
+        self.take_softmax = take_softmax
+        self.length_penalty = length_penalty
 
     def forward(self, input_ids, position_ids, attention_mask, target_ids=None, logit_mask=None, prompt_pos=None):
         if target_ids == None:
@@ -48,84 +55,35 @@ class GLMForMultiTokenCloze(torch.nn.Module):
         return logits
 
 
-class GLMForMultiTokenClozeFast(torch.nn.Module):
-    def __init__(self, language_model, take_softmax=True, length_penalty=0.0):
-        super(GLMForMultiTokenClozeFast, self).__init__()
-        self.model = language_model
+class GLMForMultiTokenClozeFast(GLMForDownstream):
+    def __init__(self, model=None, take_softmax=False, length_penalty=0.0):
+        super().__init__(model)
         self.take_softmax = take_softmax
         self.length_penalty = length_penalty
 
-    def forward(self, input_ids, position_ids, attention_mask,
-                dec_input_ids, dec_position_ids, dec_attention_mask, dec_target_ids, dec_logit_mask):
+    def forward(self, input_ids, position_ids, attention_mask,  target_ids, logit_mask):
         # encoder
-        outputs, *mems = self.model(input_ids, position_ids, attention_mask, return_memory=True, detach_memory=False)
-        batch_size, num_choices, max_dec_len = dec_input_ids.size()
-        max_enc_len = input_ids.size(-1)
-
-        enc_mems = []
-        for hidden in mems:
-            hidden = hidden.unsqueeze(1).expand(-1, num_choices, -1, -1).reshape(batch_size * num_choices,
-                                                                                 *hidden.size()[1:])
-            enc_mems.append(hidden)
-
-        def build_dec_mask_matrix(seq_length, sep, memory_length=0):
-            m = enc_mems[0].new_ones((1, seq_length, seq_length))
-            m = torch.tril(m)
-
-            # sep = dec_attention_mask
-            ids = torch.arange(memory_length, device=sep.device, dtype=sep.dtype).view(1, -1)
-            mask = ids < sep.view(-1, 1)  # batch * mem
-            mask = mask.unsqueeze(1).float().expand(-1, seq_length, -1)
-
-            m = m.expand(batch_size * num_choices, -1, -1)
-            m = torch.cat((mask, m), dim=2)
-            m = m.unsqueeze(1)
-            return m
-
-        dec_input_ids = dec_input_ids.reshape(-1, max_dec_len)
-        dec_position_ids = dec_position_ids.reshape(-1, *dec_position_ids.size()[2:])
-        # dec_attention_mask = dec_attention_mask.reshape(-1, *dec_attention_mask.size()[2:]).unsqueeze(1)
-        dec_attention_mask = build_dec_mask_matrix(max_dec_len, dec_attention_mask.reshape(-1), max_enc_len)
-        dec_target_ids = dec_target_ids.reshape(-1, dec_target_ids.size(-1))
-        dec_logit_mask = dec_logit_mask.reshape(-1, dec_logit_mask.size(-1))
-
-        outputs = self.model(dec_input_ids, dec_position_ids, dec_attention_mask, *enc_mems)
+        outputs = self.model(input_ids, position_ids, attention_mask)
         if self.take_softmax:
             outputs = torch.nn.functional.log_softmax(outputs, dim=-1)
-
-        batch_ids = torch.arange(dec_target_ids.size(0), dtype=torch.long, device=dec_target_ids.device)
-        batch_ids = batch_ids.unsqueeze(1).expand_as(dec_target_ids)
-        seq_ids = torch.arange(dec_target_ids.size(-1), dtype=torch.long, device=dec_target_ids.device)
-        seq_ids = seq_ids.unsqueeze(0).expand_as(dec_target_ids)
-        logits = outputs[batch_ids, seq_ids, dec_target_ids]
-        logits = (logits * dec_logit_mask).sum(dim=1)
+        batch_size, seq_length, vocab_size = outputs.shape
+        num_choices = target_ids.size(1)
+        outputs = outputs.repeat_interleave(num_choices, dim=0)
+        target_ids = target_ids.reshape(-1, target_ids.size(-1))
+        logit_mask = logit_mask.reshape(-1, logit_mask.size(-1))
+        logits = -vocab_parallel_cross_entropy(outputs, target_ids)
+        logits = (logits * logit_mask).sum(dim=1)
         if self.length_penalty > 0.0:
-            logits = logits / dec_logit_mask.sum(dim=1) ** self.length_penalty
+            logits = logits / logit_mask.sum(dim=1) ** self.length_penalty
         if num_choices is not None:
             logits = logits.view(-1, num_choices)
         return logits
 
 
-class GLMForSingleTokenCloze(Module):
-    def __init__(self, language_model, take_softmax=False):
-        super().__init__()
-        self.model = language_model
+class GLMForSingleTokenCloze(GLMForDownstream):
+    def __init__(self, model, take_softmax=False):
+        super().__init__(model)
         self.take_softmax = take_softmax
-
-    def state_dict(self, destination=None, prefix='', keep_vars=False):
-        # [h.remove() for h in self.hook_handles]
-        sd = self.model.state_dict(destination, prefix, keep_vars)
-        return sd
-
-    def load_state_dict(self, state_dict, strict=True):
-        return self.model.load_state_dict(state_dict, strict=strict)
-
-    def named_parameters(self, prefix: str = '', recurse: bool = True):
-        return self.model.named_parameters(prefix=prefix, recurse=recurse)
-
-    def set_input_tensor(self, input_tensor):
-        """See megatron.model.transformer.set_input_tensor()"""
-        self.model.set_input_tensor(input_tensor)
 
     def forward(self, input_ids, position_ids, attention_mask, target_ids=None, logit_mask=None, prompt_pos=None):
         if target_ids is None:

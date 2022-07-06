@@ -25,6 +25,7 @@ import numpy as np
 import torch
 import torch.utils.data
 from torch.utils.data.dataloader import default_collate
+from scipy.linalg import block_diag
 
 from megatron.enums import PositionEmbeddingType
 from megatron import get_args, mpu
@@ -104,11 +105,9 @@ def num_special_tokens_to_add(text_a_ids, text_b_ids, answer_ids, add_cls, add_s
     return num_tokens
 
 
-def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tokenizer, args=None, add_cls=True,
-                         add_sep=False, add_piece=False, add_eos=True, mask_id=None):
+def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tokenizer, args=None, add_piece=False,
+                         add_eos=True, mask_id=None):
     assert add_eos is True
-    add_cls = False
-    add_sep = False  # Hack for GLM with icetk
     if mask_id is None:
         mask_id = tokenizer.get_special_token('MASK')
     eos_id = tokenizer.get_special_token('eos')
@@ -117,11 +116,6 @@ def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tok
     ids = []
     types = []
     paddings = []
-    # CLS
-    if add_cls:
-        ids.append(cls_id)
-        types.append(0)
-        paddings.append(1)
     # A
     len_text_a = len(text_a_ids)
     ids.extend(text_a_ids)
@@ -130,10 +124,6 @@ def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tok
     # B
     if text_b_ids is not None:
         # SEP
-        if add_sep:
-            ids.append(sep_id)
-            types.append(0)
-            paddings.append(1)
         len_text_b = len(text_b_ids)
         ids.extend(text_b_ids)
         types.extend([1] * len_text_b)
@@ -191,21 +181,17 @@ def build_input_from_ids(text_a_ids, text_b_ids, answer_ids, max_seq_length, tok
         loss_masks.extend([0] * padding_length)
     if not args.position_embedding_type == PositionEmbeddingType.rotary:
         position_ids = [position_ids, block_position_ids]
-    return ids, types, paddings, position_ids, sep, target_ids, loss_masks
+    return {"text": ids, "types": types, "padding_mask": paddings, "position": position_ids, "attention_mask": sep,
+            "target": target_ids, "loss_mask": loss_masks}
 
 
-def build_decoder_input(enc_ids, answer_ids, max_seq_length, max_dec_seq_length, tokenizer):
+def build_decoder_input(enc_ids, answer_ids, max_dec_seq_length, tokenizer, mask_id=None):
     args = get_args()
 
-    mask_id = tokenizer.get_special_token('MASK')
+    if mask_id is None:
+        mask_id = tokenizer.get_special_token('MASK')
     eos_id = tokenizer.get_special_token('eos')
     sop_id = tokenizer.get_special_token('sop')
-    enc_len = len(enc_ids)
-    masks = []
-    # TODO: it probably takes too much memory
-    # for i in range(max_dec_seq_length):
-    #     m = [1]*enc_len + [0]*(max_seq_length - enc_len) + [1]*(i+1) + [0]*(max_dec_seq_length-1-i)
-    #     masks.append(m)
     mask_position = enc_ids.index(mask_id)
     len_answer = len(answer_ids)
     ids = [sop_id] + answer_ids[:-1]
@@ -227,51 +213,57 @@ def build_decoder_input(enc_ids, answer_ids, max_seq_length, max_dec_seq_length,
         loss_masks.extend([0] * padding_length)
     if not args.position_embedding_type == PositionEmbeddingType.rotary:
         position_ids = [position_ids, block_position_ids]
-    return ids, types, paddings, position_ids, masks, target_ids, loss_masks
+    return {"dec_text": ids, "dec_types": types, "dec_padding_mask": paddings, "dec_position": position_ids,
+            "dec_target": target_ids, "dec_logit_mask": loss_masks}
 
 
-def build_sample(ids, types=None, paddings=None, positions=None, masks=None, label=None, unique_id=None, target=None,
-                 logit_mask=None, segment_ids=None, prompt_ids=None):
-    """Convert to numpy and return a sample consumed by the batch producer."""
+def build_concatenated_input(text, choices, max_seq_length, tokenizer, add_cls=False, add_eos=True, mask_id=None):
+    args = get_args()
 
-    ids_np = np.array(ids, dtype=np.int64)
-    sample = {'text': ids_np, 'label': int(label)}
-    if types is not None:
-        types_np = np.array(types, dtype=np.int64)
-        sample['types'] = types_np
-    if paddings is not None:
-        paddings_np = np.array(paddings, dtype=np.int64)
-        sample['padding_mask'] = paddings_np
-    if positions is not None:
-        positions_np = np.array(positions, dtype=np.int64)
-        sample['position'] = positions_np
-    if masks is not None:
-        masks_np = np.array(masks, dtype=np.int64)
-        sample['mask'] = masks_np
-    if target is not None:
-        target_np = np.array(target, dtype=np.int64)
-        sample['target'] = target_np
-    if logit_mask is not None:
-        logit_mask_np = np.array(logit_mask, dtype=np.int64)
-        sample['logit_mask'] = logit_mask_np
-    if segment_ids is not None:
-        segment_ids = np.array(segment_ids, dtype=np.int64)
-        sample['segment_id'] = segment_ids
-    if prompt_ids is not None:
-        prompt_ids = np.array(prompt_ids, dtype=np.int64)
-        sample['prompt_pos'] = prompt_ids
-    if unique_id is not None:
-        sample['uid'] = unique_id
-    return sample
-
-
-def build_decoder_sample(sample, dec_ids, dec_position, dec_masks, dec_target, dec_logit_mask):
-    sample['dec_text'] = np.array(dec_ids)
-    sample['dec_position'] = np.array(dec_position)
-    sample['dec_mask'] = np.array(dec_masks)
-    sample['dec_target'] = np.array(dec_target)
-    sample['dec_logit_mask'] = np.array(dec_logit_mask)
-    return sample
+    ids = []
+    if add_cls:
+        cls_id = tokenizer.get_special_token('ENC')
+        ids.append(cls_id)
+    ids.extend(text)
+    if add_eos:
+        eos_id = tokenizer.get_special_token('eos')
+        ids.append(eos_id)
+    sep = len(ids)
+    target_id = [0] * len(ids)
+    loss_mask = [0] * len(ids)
+    position_ids = list(range(len(ids)))
+    block_position_ids = [0] * len(ids)
+    sop_id = tokenizer.get_special_token('sop')
+    if mask_id is None:
+        mask_id = tokenizer.get_special_token('MASK')
+    mask_position = ids.index(mask_id)
+    choice_target_ids, choice_loss_masks, choice_attention_masks = [], [], [np.ones((sep, sep), dtype=np.long)]
+    for choice_ids in choices:
+        ids.extend([sop_id] + choice_ids[:-1])
+        position_ids.extend([mask_position] * len(choice_ids))
+        block_position_ids.extend(range(1, len(choice_ids) + 1))
+        target_id = target_id + choice_ids
+        choice_target_ids.append(target_id)
+        choice_loss_masks.append(loss_mask + [1] * len(choice_ids))
+        loss_mask = loss_mask + [0] * len(choice_ids)
+        choice_attention_masks.append(np.tril(np.ones((len(choice_ids), len(choice_ids)), dtype=np.long)))
+    padding_length = max_seq_length - len(ids)
+    if padding_length > 0:
+        ids.extend([0] * padding_length)
+        position_ids.extend([0] * padding_length)
+        block_position_ids.extend([0] * padding_length)
+        choice_attention_masks.append(np.ones((padding_length, padding_length), dtype=np.long))
+    for i in range(len(choice_target_ids)):
+        if len(choice_target_ids[i]) < max_seq_length:
+            choice_target_ids[i].extend([0] * (max_seq_length - len(choice_target_ids[i])))
+            choice_loss_masks[i].extend([0] * (max_seq_length - len(choice_loss_masks[i])))
+    attention_mask = block_diag(*choice_attention_masks)
+    attention_mask[:, :sep] = 1
+    attention_mask = attention_mask[None, :, :]
+    if not args.position_embedding_type == PositionEmbeddingType.rotary:
+        position_ids = [position_ids, block_position_ids]
+    return {"text": ids, "position": position_ids, "attention_mask": attention_mask, "target": choice_target_ids,
+            "loss_mask": choice_loss_masks}
 
 
 def my_collate(batch):
@@ -292,10 +284,19 @@ def my_collate(batch):
                     sample[key] = pad_choice_dim(value, max_choice_num)
                 else:
                     sample[key] = value
-            sample['loss_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
-                                           dtype=np.int64)
-
-    if 'dec_text' in new_batch[0]:
+            sample['choice_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
+                                             dtype=np.int64)
+    elif 'target' in new_batch[0]:
+        target_list = [sample['target'] for sample in batch]
+        if len(target_list[0].shape) == 2:
+            choice_nums = list(map(len, target_list))
+            max_choice_num = max(choice_nums)
+            for i, sample in enumerate(new_batch):
+                for key in ['target', 'loss_mask']:
+                    sample[key] = pad_choice_dim(sample[key], max_choice_num)
+                sample['choice_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
+                                             dtype=np.int64)
+    elif 'dec_text' in new_batch[0]:
         choice_nums = [len(sample['dec_text']) for sample in new_batch]
         if choice_nums.count(choice_nums[0]) != len(choice_nums):
             max_choice_num = max(choice_nums)
@@ -303,8 +304,8 @@ def my_collate(batch):
                 for key, value in sample.items():
                     if key.startswith('dec_'):
                         sample[key] = pad_choice_dim(value, max_choice_num)
-                sample['loss_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
-                                               dtype=np.int64)
+                sample['choice_mask'] = np.array([1] * choice_nums[i] + [0] * (max_choice_num - choice_nums[i]),
+                                                 dtype=np.int64)
 
     new_batch = default_collate(new_batch)
     if 'uid' in batch[0]:
