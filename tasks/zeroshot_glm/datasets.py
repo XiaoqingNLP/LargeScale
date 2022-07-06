@@ -6,7 +6,7 @@ import json
 import numpy as np
 import torch
 
-from megatron import get_tokenizer
+from megatron import get_tokenizer, get_args
 from scipy.linalg import block_diag
 
 
@@ -51,6 +51,8 @@ class ZeroShotDataset(torch.utils.data.Dataset):
     If [MASK] not in context, will append [MASK] after text
     """
     def __init__(self, path, use_gmask=False, max_seq_length=2048):
+        args = get_args()
+
         self.path = path
         self.use_gmask = use_gmask
         self.max_seq_length = max_seq_length
@@ -65,6 +67,7 @@ class ZeroShotDataset(torch.utils.data.Dataset):
         self.dtype = np.long
 
         self.is_single_token = True
+        self.unified_multitask_encoding = args.unified_multitask_encoding
 
         with open(os.path.join(path), 'r') as file:
             for line in file:
@@ -83,6 +86,9 @@ class ZeroShotDataset(torch.utils.data.Dataset):
                 if len(text) + tgt_seq_length + 2 > max_seq_length:
                     text_length = max_seq_length - tgt_seq_length - 2
                     text = text[len(text) - text_length:len(text)]
+
+                assert not (self.tmask_id in text and self.unified_multitask_encoding), \
+                    "Unified multitask encoding don't support blank filling"
 
                 self.data.append({
                     'text': text,
@@ -115,8 +121,8 @@ class ZeroShotDataset(torch.utils.data.Dataset):
         for choice in choices:
             position_id = np.concatenate((
                 position_id,
-                [mask_position] * len(choice)
-                # np.arange(division, division + len(choice), dtype=self.dtype)
+                [mask_position] * len(choice) if not self.unified_multitask_encoding else
+                np.arange(mask_position, mask_position + len(choice), dtype=self.dtype)
             ))
             choice_target_id.append(np.arange(len(token), len(token) + len(choice), dtype=self.dtype))
             attention_mask.append(np.tril(np.ones((len(choice), len(choice)), dtype=np.long)))

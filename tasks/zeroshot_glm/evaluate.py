@@ -79,7 +79,7 @@ def forward_step(batch, model):
         if batch['is_single_token'].any():
             target_ids = batch['choice_target_ids'][0]
             logits = output[batch_ids, target_ids, batch['choices']]
-            choice_logits.append(logits.squeeze(0).tolist())
+            choice_logits = logits.squeeze(0).tolist()
             # if mpu.get_tensor_model_parallel_rank() == 0:
             #     for target_ids in batch['choice_target_ids']:
             #         print(output[batch_ids, target_ids, target_vocab].squeeze(0).tolist())
@@ -193,7 +193,7 @@ def main():
             predicted_gathered = torch.tensor(np.zeros((len(datasets[i]) + world_size - 1) // world_size * world_size),
                                               dtype=torch.int64, device=torch.cuda.current_device())
             predicted_gathered[rank::world_size] = \
-                torch.tensor(np.argmax(outputs, axis=-1), dtype=torch.int64, device=torch.cuda.current_device()).squeeze(1)
+                torch.tensor(np.argmax(outputs, axis=-1), dtype=torch.int64, device=torch.cuda.current_device())
             torch.distributed.all_reduce(predicted_gathered, group=mpu.get_data_parallel_group())
             predicted_gathered = predicted_gathered[:len(datasets[i])].tolist()
 
