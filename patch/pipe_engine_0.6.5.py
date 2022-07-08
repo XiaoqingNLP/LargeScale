@@ -361,7 +361,7 @@ class PipelineEngine(DeepSpeedEngine):
                 iter_time = elapsed / self.steps_per_print()
                 tput = self.train_batch_size() / iter_time
                 print(f'steps: {self.global_steps} '
-                      f'loss: {self.agg_train_loss:0.4f} '
+                      f'loss: {self.agg_train_loss} '
                       f'iter time (s): {iter_time:0.3f} '
                       f'samples/sec: {tput:0.3f}')
 
@@ -551,9 +551,15 @@ class PipelineEngine(DeepSpeedEngine):
 
     def _aggregate_total_loss(self):
         # Scale loss, average among DP ranks, and bcast loss to the rest of my DP group
+        LOSS_TYPE = 3
         if self.is_last_stage():
+            loss_all = torch.tensor(self.loss_all).to(self.device)
+            input_types = torch.concat(self.input_types).to(self.device).squeeze(1)
+            types_loss = [torch.sum(loss_all * (input_types == i)) / (input_types == i).sum() for i in range(LOSS_TYPE)]
+
             loss = self._scale_loss_by_gas(self.total_loss)
-            self.dp_group_loss = loss.clone().detach()
+            # self.dp_group_loss = loss.clone().detach()
+            self.dp_group_loss = torch.tensor([loss, *types_loss]).to(self.device)
 
             ## Average loss across all data-parallel groups
             agg_loss = self.dp_group_loss.clone().detach()
@@ -563,7 +569,8 @@ class PipelineEngine(DeepSpeedEngine):
                 agg_loss /= self.dp_world_size
 
             assert self.global_rank in self.grid.pp_group
-            losses = torch.Tensor([self.dp_group_loss, agg_loss]).to(self.device)
+            # losses = torch.Tensor([self.dp_group_loss, agg_loss]).to(self.device)
+            losses = torch.vstack([self.dp_group_loss, agg_loss]).to(self.device)
             dist.broadcast(tensor=losses,
                            src=self.global_rank,
                            group=self.mpu.get_pipe_parallel_group())
@@ -572,7 +579,8 @@ class PipelineEngine(DeepSpeedEngine):
             # Get loss from last stage
             src_rank = self.grid.stage_to_global(self.num_stages - 1)
             assert src_rank in self.grid.pp_group
-            losses = torch.Tensor([0., 0.]).to(self.device)
+            # losses = torch.Tensor([0., 0.]).to(self.device)
+            losses = torch.Tensor([[0.] * (LOSS_TYPE + 1), [0.] * (LOSS_TYPE + 1)]).to(self.device)
             dist.broadcast(tensor=losses,
                            src=src_rank,
                            group=self.grid.get_pipe_parallel_group())
@@ -704,6 +712,7 @@ class PipelineEngine(DeepSpeedEngine):
                 self.outputs = outputs
             if isinstance(self.loss, torch.Tensor):
                 self.fwd_outputs.append(self.loss.detach())
+                self.loss_all.append(self.loss.clone().detach())
 
                 if self.total_loss is None:
                     self.total_loss = torch.zeros_like(self.loss)
@@ -829,6 +838,7 @@ class PipelineEngine(DeepSpeedEngine):
                 loaded = tuple(loaded)
 
             self.pipe_buffers['labels'][buffer_id] = loaded
+            self.input_types.append(loaded[2])
 
         if self.wall_clock_breakdown():
             self.timers('batch_input').stop()
@@ -1369,6 +1379,8 @@ class PipelineEngine(DeepSpeedEngine):
         # Reserve and reset buffers.
         self._reserve_pipe_buffers(pipe_schedule.num_pipe_buffers())
         self.fwd_outputs = []
+        self.loss_all = []
+        self.input_types = []
 
         # For each step in the schedule
         for step_cmds in pipe_schedule:
