@@ -286,10 +286,11 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
             return 0
         release = False
 
+        if not load_optimizer_states:
+            optimizer.refresh_fp32_params()
         if args.load_deepspeed_model_only:
             model[0].global_steps = 0
             model[0].skipped_steps = 0
-            optimizer.refresh_fp32_params()
             print_rank_0("Successfully load DeepSpeed model with --load_deepspeed_model_only")
             return 0
     else:
