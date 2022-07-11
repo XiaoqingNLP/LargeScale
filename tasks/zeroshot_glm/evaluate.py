@@ -119,7 +119,7 @@ def evaluate(data_loader, model):
             output = forward_step(batch, model)
             # Reduce across processes.
             if mpu.is_pipeline_last_stage():
-                outputs.append(output)
+                outputs.append(np.argmax(output))
 
     return outputs
 
@@ -193,7 +193,7 @@ def main():
             predicted_gathered = torch.tensor(np.zeros((len(datasets[i]) + world_size - 1) // world_size * world_size),
                                               dtype=torch.int64, device=torch.cuda.current_device())
             predicted_gathered[rank::world_size] = \
-                torch.tensor(np.argmax(outputs, axis=-1), dtype=torch.int64, device=torch.cuda.current_device())
+                torch.tensor(outputs, dtype=torch.int64, device=torch.cuda.current_device())
             torch.distributed.all_reduce(predicted_gathered, group=mpu.get_data_parallel_group())
             predicted_gathered = predicted_gathered[:len(datasets[i])].tolist()
 
