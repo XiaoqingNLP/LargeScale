@@ -330,6 +330,19 @@ class GLMPreprocessor:
         if len(text) + len(target) + 2 > max_seq_length:
             target = target[:max_seq_length - len(text) - 2]
         dtype = text.dtype
+        if self.mask_id in text:
+            assert self.unified_multitask_encoding
+            mask_position = np.where(self.mask_id)[0][0]
+            tokens = np.concatenate((text, [self.sop_id], target))
+            targets = np.concatenate((text, target, [self.eop_id]))
+            loss_masks = np.concatenate((np.zeros(len(text), dtype=dtype), np.ones(len(target) + 1, dtype=dtype)))
+            position_ids = np.arange(len(tokens), dtype=dtype)
+            position_ids[len(text):] = mask_position
+            position_ids = np.stack([position_ids, position_ids])
+            division = len(text)
+            tokens, targets, loss_masks, position_ids = self.pad_batch(tokens, targets, loss_masks, position_ids,
+                                                                       max_seq_length=max_seq_length)
+            return tokens, targets, loss_masks, position_ids[0], np.array([division], dtype=dtype)
         tokens = np.concatenate((text, [self.mask_id, self.sop_id], target))
         targets = np.concatenate((text, [self.mask_id], target, [self.eop_id]))
         loss_masks = np.concatenate((np.zeros(len(text) + 1, dtype=dtype), np.ones(len(target) + 1, dtype=dtype)))
