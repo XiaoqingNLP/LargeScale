@@ -667,7 +667,7 @@ class RtePVP(PVP):
 
     @staticmethod
     def available_patterns():
-        return [0, 1, 2, 3, 4]
+        return [0, 1, 2, 3, 4, 5, 6]
 
     def get_parts(self, example: InputExample) -> FilledPattern:
         # switch text_a and text_b to get the correct order
@@ -688,6 +688,14 @@ class RtePVP(PVP):
         elif self.pattern_id == 4:
             parts_a, parts_b = [None, self.shortenable(text_a), None, ' question:', self.shortenable(" " + text_b),
                                 ' True or False?', None, ' answer:', [self.mask]], []
+        elif self.pattern_id == 5:
+            # Promptsource can we infer
+            parts_a, parts_b = ["Suppose", self.shortenable(" " + text_a), " Can we infer that",
+                                self.shortenable(" " + text_b), "? Yes or no?", [self.mask]], []
+        elif self.pattern_id == 6:
+            # Promptsource does this imply
+            parts_a, parts_b = [self.shortenable(" " + text_a), " Question: Does this imply that",
+                                self.shortenable(" " + text_b), "? Yes or no?", [self.mask]], []
         else:
             raise NotImplementedError(self.pattern_id)
         parts_a, parts_b = self.replace_prompt_tokens(parts_a, parts_b)
@@ -739,7 +747,7 @@ class BoolQPVP(PVP):
 
     @staticmethod
     def available_patterns():
-        return [0, 1, 2, 3, 4, 5]
+        return [0, 1, 2, 3, 4, 5, 6]
 
     def get_parts(self, example: InputExample) -> FilledPattern:
         passage = example.text_a
@@ -754,6 +762,9 @@ class BoolQPVP(PVP):
         elif self.pattern_id < 6:
             parts_a, parts_b = ['Based on the following passage', None, self.shortenable(" " + question), '?', None,
                                 [self.mask], '.', None, self.shortenable(" " + passage)], []
+        elif self.pattern_id == 6:
+            # Promptsource GPT-3 style
+            parts_a, parts_b = [self.shortenable(passage), "\nQuestion:", " " + question, "\nAnswer:", [self.mask]], []
         else:
             raise NotImplementedError(self.pattern_id)
         parts_a, parts_b = self.replace_prompt_tokens(parts_a, parts_b)
