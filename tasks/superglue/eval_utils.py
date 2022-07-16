@@ -99,21 +99,31 @@ def accuracy_func_provider(single_dataset_provider, metric_dict, args, is_test=F
 
 segment_length = 10
 
+def is_port_in_use(port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
+
 
 def get_spare_port(args):
     if torch.distributed.get_rank() == 0:
-        port = subprocess.check_output(["shuf -n 1 -i 10000-65535"], shell=True)
-        port = int(port.strip())
-        if port == args.master_port:
+        while True:
             port = subprocess.check_output(["shuf -n 1 -i 10000-65535"], shell=True)
             port = int(port.strip())
-        port = torch.cuda.LongTensor([port])
+            if port == args.master_port:
+                port = subprocess.check_output(["shuf -n 1 -i 10000-65535"], shell=True)
+                port = int(port.strip())
+            if is_port_in_use(port):
+                continue
+            port = torch.cuda.LongTensor([port])
+            break
     else:
         port = torch.cuda.LongTensor([0])
     torch.distributed.broadcast(port, 0)
     port = port.item()
     return port
 
+store = None
 
 def multichoice_evaluate(model, dataloader, example_dict, args):
     """Calculate correct over total answers and return prediction if the
@@ -124,11 +134,13 @@ def multichoice_evaluate(model, dataloader, example_dict, args):
     model = model[0]
 
     model.eval()
-    port = get_spare_port(args)
-    print_rank_0(f"Using port {port}")
-    store = torch.distributed.TCPStore(args.master_ip, port,
-                                       torch.distributed.get_world_size(),
-                                       torch.distributed.get_rank() == 0, datetime.timedelta(seconds=30))
+    global store
+    if store is None:
+        port = get_spare_port(args)
+        print_rank_0(f"Using port {port}")
+        store = torch.distributed.TCPStore(args.master_ip, port,
+                                           torch.distributed.get_world_size(),
+                                           torch.distributed.get_rank() == 0, datetime.timedelta(seconds=30))
     # file_path = os.path.join("/cache", args.experiment_name + "_store")
     # print_rank_0(f"Using file store at {file_path}")
     # store = torch.distributed.FileStore(file_path, torch.distributed.get_world_size())
@@ -195,5 +207,9 @@ def multichoice_evaluate(model, dataloader, example_dict, args):
         predictions.append(prediction)
         labels.append(label)
         examples.append(example)
+    torch.distributed.barrier()
+    if torch.distributed.get_rank() == 0:
+        for uid, example in example_dict.items():
+            store.delete_key(uid)
     torch.distributed.barrier()
     return predictions, labels, examples
