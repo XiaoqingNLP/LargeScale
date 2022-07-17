@@ -362,6 +362,11 @@ class GLMPreprocessor:
                 if len(target) < len(self.adaptive_length_distribution) \
                         and rng.random() < self.adaptive_length_distribution[len(target)]:
                     position_ids[len(text) + 1:] = len(text)
+                else:
+                    position_ids = np.concatenate((np.arange(len(text) + 1, dtype=dtype),
+                                                   np.arange(len(text), len(text) + len(target) + 1, dtype=dtype)))
+                    position_ids = np.concatenate((position_ids,
+                                                   np.zeros(max_seq_length - len(position_ids), dtype=dtype)))
             elif self.unified_multitask_encoding:
                 position_ids = np.concatenate((np.arange(len(text) + 1, dtype=dtype),
                                          np.arange(len(text), len(text) + len(target) + 1, dtype=dtype)))
