@@ -491,7 +491,7 @@ class CopaPVP(PVP):
 class WscPVP(PVP):
     @staticmethod
     def available_patterns():
-        return [0, 1, 2]
+        return [0, 1, 2, 3]
 
     @property
     def is_multi_token(self):
@@ -528,6 +528,10 @@ class WscPVP(PVP):
             parts_a, parts_b = [None, text_a, None,
                                 " Question: In the passage above, what does the pronoun '*" + pronoun + "*' refer to?",
                                 None,
+                                " Answer:", [self.mask], '.'], []
+        elif self.pattern_id == 3:
+            parts_a, parts_b = [text_a,
+                                " Question: In the passage above, what does the pronoun '*" + pronoun + "*' refer to?",
                                 " Answer:", [self.mask], '.'], []
         else:
             raise NotImplementedError(self.pattern_id)
@@ -828,7 +832,7 @@ class WicPVP(PVP):
 
     @staticmethod
     def available_patterns():
-        return [0, 1, 2]
+        return [0, 1, 2, 3]
 
     def get_parts(self, example: InputExample) -> FilledPattern:
         text_a = example.text_a
@@ -844,6 +848,11 @@ class WicPVP(PVP):
         elif self.pattern_id == 2:
             parts_a, parts_b = [None, word, ' .', None, ' Sense (1) (a) "', self.shortenable(text_a), '"', None, ' (',
                                 [self.mask], ') "', text_b, '"'], []
+        elif self.pattern_id == 3:
+            # Promptsource GPT-3-prompt
+            parts_a, parts_b = [self.shortenable(text_a), self.shortenable(" " + text_b),
+                                f" Question: Is the word {word} used in the same sense in the two sentences above?",
+                                [self.mask]], []
         else:
             raise NotImplementedError(self.pattern_id)
         parts_a, parts_b = self.replace_prompt_tokens(parts_a, parts_b)
