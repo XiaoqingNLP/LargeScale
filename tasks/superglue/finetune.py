@@ -173,12 +173,24 @@ def finetune_forward_step(batch, model):
         hinge_loss[hinge_loss < 0.0] = 0.0
         loss = hinge_loss.sum(dim=1).mean() - 1.0
     elif args.loss_func == "generative" or args.loss_func == "mix":
-        raise NotImplementedError
         batch_size = logits.size(0)
-        loss = - logits[range(batch_size), labels].mean()
+        loss = -logits[range(batch_size), labels].mean()
         if args.loss_func == "mix":
-            loss_func = torch.nn.CrossEntropyLoss()
-            loss = loss + loss_func(logits.contiguous().float(), labels)
+            def mixed_cross_entropy_loss_func(loss, labels, output_tensor):
+                logits = output_tensor
+
+                # Cross-entropy loss.
+                loss_func = torch.nn.CrossEntropyLoss()
+                loss += loss_func(logits.contiguous().float(), labels)
+
+                # Reduce loss for logging.
+                averaged_loss = average_losses_across_data_parallel_group([loss])
+
+                return loss, {'lm loss': averaged_loss[0]}
+
+            return logits.contiguous().float(), partial(mixed_cross_entropy_loss_func, loss, labels)
+        else:
+            raise NotImplementedError
     else:
         raise NotImplementedError
 
