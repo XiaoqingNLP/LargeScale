@@ -9,7 +9,7 @@ XXLARGE_EPOCH=100
 
 TRAIN_ARGS="--lr-decay-style linear \
             --lr-warmup-fraction 0.1 \
-            --weight-decay 0.1"
+            --weight-decay 1e-4"
 
 COMMON_ARGS="--save-interval 10000 \
              --log-interval 50 \
