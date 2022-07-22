@@ -72,6 +72,8 @@ def get_tasks_args(parser):
 
     group.add_argument("--length-penalty", type=float, default=0.0)
 
+    group.add_argument('--freeze-prefix-layer-num', type=int, default=None)
+
     return parser
 
 

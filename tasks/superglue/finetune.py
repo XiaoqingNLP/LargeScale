@@ -101,6 +101,10 @@ def model_provider(pre_process=True, post_process=True, model_type='multiple_cho
         for layer in model.model.language_model.encoder.layers:
             if hasattr(layer.self_attention, "prefix_prompts"):
                 layer.self_attention.prefix_prompts.requires_grad_(True)
+    if args.freeze_prefix_layer_num:
+        for idx, layer in enumerate(model.model.language_model.encoder.layers):
+            if idx < args.freeze_prefix_layer_num:
+                layer.requires_grad_(False)
     return model
 
 
