@@ -85,6 +85,9 @@ class _IceTokenizer(AbstractTokenizer):
         return "".join([self.IdToToken(t) for t in token_ids])
         # return self.tokenizer.decode(token_ids)
 
+    def decode(self, token_ids):
+        return self.tokenizer.decode(token_ids)
+
     @property
     def eod(self):
         return self.get_special_token('eos')

@@ -19,6 +19,7 @@ import copy
 import json
 import os
 import time
+import functools
 
 import torch
 import torch.nn.functional as F
@@ -493,8 +494,10 @@ def sample_sequence_batch(model, context_tokens, context_lengths,
         # eos_id as an argument and needs termination when that id id found.
         if hasattr(args, 'eos_id'):
             eos_id = args.eos_id
+            if not isinstance(eos_id, list):
+                eos_id = [eos_id]
         else:
-            eos_id = tokenizer.eod
+            eos_id = [tokenizer.eod]
 
         counter = 0
         org_context_length = context_length
@@ -569,7 +572,11 @@ def sample_sequence_batch(model, context_tokens, context_lengths,
                 group = mpu.get_embedding_group()
                 torch.distributed.broadcast(new_tokens, src, group)
 
-                done_token = ((prev == eos_id).byte() & started.byte()) and not args.benchmark
+                done_token = (
+                    functools.reduce(
+                        lambda x, y: torch.logical_or(x, y), [prev == idx for idx in eos_id]
+                    ).byte() & started.byte()
+                ) and not args.benchmark
                 just_finished = (done_token & ~is_done).bool()
                 lengths[just_finished.view(-1)] = context_length
                 is_done = is_done | done_token
