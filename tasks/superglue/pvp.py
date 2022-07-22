@@ -789,7 +789,7 @@ class MultiRcPVP(PVP):
 
     @staticmethod
     def available_patterns():
-        return [0, 1, 2, 3, 4]
+        return [0, 1, 2, 3, 4, 5]
 
     def get_parts(self, example: InputExample) -> FilledPattern:
         passage = self.remove_final_punc(self.shortenable(example.text_a.rstrip()))
@@ -809,6 +809,10 @@ class MultiRcPVP(PVP):
         elif self.pattern_id == 4:
             parts_a, parts_b = [passage, '.', None, ' Question:', " " + question, '?', None, " " + answer, '?', None,
                                 [self.mask], '.'], []
+        elif self.pattern_id == 5:
+            # Promptsource would it be good to answer
+            parts_a, parts_b = [passage, '\n', question, '\nWould it be good to answer', " " + answer, "?",
+                                [self.mask]], []
         else:
             raise NotImplementedError(self.pattern_id)
         parts_a, parts_b = self.replace_prompt_tokens(parts_a, parts_b)
