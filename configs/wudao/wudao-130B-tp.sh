@@ -1,4 +1,5 @@
 #! /bin/bash
+NAME="glm-130B-tp"
 
 TP_SIZE=8
 PP_SIZE=1
@@ -7,6 +8,8 @@ NHIDDEN=12288
 FFN_HIDDEN=$((NHIDDEN * 8 / 3))
 NLAYERS=70
 NHEADS=96
+
+CHECKPOINT_PATH="/mnt/yrfs/aohan/checkpoints/glm-130B-tp/global_step49300"
 
 GLM_ARGS="
        --tensor-model-parallel-size $TP_SIZE \

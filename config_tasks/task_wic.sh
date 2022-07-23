@@ -3,14 +3,15 @@ EXP_NAME=wic-${NAME}-${TIMESTAMP}
 DATA_PATH="${DATA_ROOT}/WiC"
 MAX_SEQ_LEN=256
 
-LR_SINGLE=1e-5
-EPOCH_SINGLE=100
-XXLARGE_EPOCH=50
+LR=1e-5
+EPOCH=50
+
+LR_PT=5e-3
+EPOCH_PT=150
 
 TRAIN_ARGS="
             --lr-decay-style linear \
             --lr-warmup-fraction 0.1 \
-            --weight-decay 1.0e-4 \
             --fast-decode \
             --pattern-id 3"
 

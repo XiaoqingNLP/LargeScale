@@ -3,13 +3,14 @@ EXP_NAME=cb-${NAME}-${TIMESTAMP}
 DATA_PATH="${DATA_ROOT}/CB"
 MAX_SEQ_LEN=256
 
-LR_SINGLE=8e-3
-EPOCH_SINGLE=100
-XXLARGE_EPOCH=100
+LR=1e-5
+EPOCH=100
+
+LR_PT=5e-3
+EPOCH_PT=200
 
 TRAIN_ARGS="--lr-decay-style linear \
             --lr-warmup-fraction 0.1 \
-            --weight-decay 1.0e-4 \
             --pattern-id 6"
 
 COMMON_ARGS="--save-interval 1000000 \

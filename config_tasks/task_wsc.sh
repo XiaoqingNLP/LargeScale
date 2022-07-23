@@ -3,13 +3,14 @@ EXP_NAME=wsc-${NAME}-${TIMESTAMP}
 DATA_PATH="${DATA_ROOT}/WSC-negative"
 MAX_SEQ_LEN=128
 
-LR_SINGLE=1e-5
-EPOCH_SINGLE=100
-XXLARGE_EPOCH=50
+LR=1e-5
+EPOCH=50
+
+LR_PT=5e-3
+EPOCH_PT=150
 
 TRAIN_ARGS="--lr-decay-style linear \
             --lr-warmup-fraction 0.1 \
-            --weight-decay 1.0e-4 \
             --wsc-negative \
             --length-penalty 1 \
             --loss-func mix \

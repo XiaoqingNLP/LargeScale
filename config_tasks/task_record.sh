@@ -3,13 +3,14 @@ TASK_NAME=ReCoRD
 DATA_PATH="${DATA_ROOT}/ReCoRD"
 MAX_SEQ_LEN=512
 
-LR_SINGLE=5e-3
-EPOCH_SINGLE=12
-XXLARGE_EPOCH=3
+LR=1e-5
+EPOCH=3
+
+LR_PT=5e-3
+EPOCH_PT=12
 
 TRAIN_ARGS="--lr-decay-style linear \
             --lr-warmup-fraction 0.1 \
-            --weight-decay 1.0e-4 \
             --pattern-id 0"
 
 COMMON_ARGS="--save-interval 1000000 \
@@ -22,4 +23,4 @@ COMMON_ARGS="--save-interval 1000000 \
 
 PATTERN_IDS=(0)
 
-BATCH_SIZE=64
+BATCH_SIZE=32

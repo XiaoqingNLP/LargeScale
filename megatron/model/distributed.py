@@ -205,6 +205,9 @@ class DistributedDataParallel(DistributedDataParallelBase):
                     buckets[tp].append(param)
                     param.main_grad = param.grad
 
+            if mpu.get_data_parallel_world_size() == 1:
+                return
+
             # For each bucket, all-reduce and copy all-reduced grads.
             for tp in buckets:
                 bucket = buckets[tp]

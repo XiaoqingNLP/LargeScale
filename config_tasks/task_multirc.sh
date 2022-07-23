@@ -1,25 +1,26 @@
-EXP_NAME=MultiRC-${NAME}-${TIMESTAMP}
-TASK_NAME=multirc
+TASK_NAME=MultiRC
+EXP_NAME=multirc-${NAME}-${TIMESTAMP}
 DATA_PATH="${DATA_ROOT}/MultiRC"
 MAX_SEQ_LEN=512
 
-LR_SINGLE=3e-3
-EPOCH_SINGLE=15
-XXLARGE_EPOCH=12
+LR=1e-5
+EPOCH=15
+
+LR_PT=5e-3
+EPOCH_PT=20
 
 TRAIN_ARGS="--lr-decay-style linear \
             --lr-warmup-fraction 0.1 \
-            --weight-decay 1.0e-4 \
-            --pattern-id 0"
+            --pattern-id 5"
 
 COMMON_ARGS="--save-interval 1000000 \
-             --log-interval 1 \
+             --log-interval 100 \
              --eval-interval 1000000 \
              --eval-iters 100 \
              --fast-decode \
              --tgt-seq-length 32"
 
-PATTERN_IDS=(0 1 2)
+PATTERN_IDS=(0 1 2 3 4 5)
 PROMPT_IDS=(1 2 3)
 
 BATCH_SIZE=32
