@@ -482,7 +482,7 @@ def forward_step(model, tokens, position_ids, attention_mask, tokentype_ids,
 
 def sample_sequence_batch(model, context_tokens, context_lengths,
                           attention_mask, position_ids,
-                          maxlen=None, type_ids=None):
+                          maxlen=None, type_ids=None, no_eos=False, no_punctuation=False):
     args = get_args()
     tokenizer = get_tokenizer()
 
@@ -553,6 +553,12 @@ def sample_sequence_batch(model, context_tokens, context_lengths,
                     logits = output[:, -1].view(batch_size, -1).contiguous()
 
             if mpu.is_pipeline_last_stage():
+                if no_eos:
+                    for idx in eos_id:
+                        logits[:, idx] = -1e4
+                if no_punctuation:
+                    for idx in [20068, 146010, 146337]:
+                        logits[:, idx] = -1e4
                 if args.greedy:
                     prev = torch.argmax(logits, dim=-1).view(-1)
                 else:

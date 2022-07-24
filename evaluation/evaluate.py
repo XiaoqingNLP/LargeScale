@@ -22,6 +22,8 @@ from evaluation.utils import build_data_loader, cond_log_prob, generate_text
 
 
 def evaluate(dataset, data_loader, model):
+    args = get_args()
+
     model.eval()
 
     prediction = []
@@ -33,12 +35,16 @@ def evaluate(dataset, data_loader, model):
                     prediction.append(np.argmax(output))
             elif dataset.task_type == "gen":
                 blank = []
-                for tokens, _ in generate_text(model, batch):
+                max_tgt_length = max([target.size(1) for target in batch['targets']])
+                for length, (tokens, _) in enumerate(generate_text(model, batch)):
                     if mpu.is_pipeline_last_stage():
                         token = tokens[0, batch["context_length"] + len(blank)].item()
                         blank.append(token)
+                    if max_tgt_length + args.generation_tolerance_length == length + 1:
+                        break
                 if mpu.is_pipeline_last_stage():
-                    blank = blank[:-1]  # drop eop token
+                    while len(blank) > 0 and blank[-1] in args.eos_id:
+                        blank = blank[:-1]  # drop eos token
                     prediction.append(blank)
 
     result = None
@@ -72,15 +78,20 @@ def main():
         datasets, dataloaders, filenames = [], [], []
 
         print_rank_last(f"Evaluating task {task}")
-        for file_name in sorted(glob.glob(os.path.join(args.eval_data_path, task, "**/*.json*"), recursive=True)):
-            if file_name.endswith("_predict.json"):
-                continue
+        for root, dirs, files in os.walk(os.path.join(args.eval_data_path, task)):
+            if not dirs:  # leaf dirs
+                for filename in files:
+                    if filename.endswith(".jsonl"):
+                        filename = os.path.join(root, filename)
+        # for file_name in sorted(glob.glob(os.path.join(args.eval_data_path, task, "**/*.jsonl"), recursive=True)):
+            # if file_name.endswith("_predict.jsonl") or file_name.endswith("test.jsonl"):
+            #     continue
             # print_rank_0(f"Loading {file_name}")
-            dataset = build_dataset(file_name)
-            dataloader = build_data_loader(dataset, args.micro_batch_size, args.num_workers, drop_last=False)
-            datasets.append(dataset)
-            dataloaders.append(dataloader)
-            filenames.append(file_name)
+                        dataset = build_dataset(filename)
+                        dataloader = build_data_loader(dataset, args.micro_batch_size, args.num_workers, drop_last=False)
+                        datasets.append(dataset)
+                        dataloaders.append(dataloader)
+                        filenames.append(filename)
 
         if len(datasets) == 0:
             continue
@@ -100,9 +111,10 @@ def main():
         for key, value in result_dict_all.items():
             idx = np.argmax(value)
             print_rank_last(
-                f"    Metric {key}: max({'/'.join(result_dict_all.keys())}) = "
-                f"{'/'.join(map(lambda x: str(x[idx]), result_dict_all.values()))}"
-                f" | median = {np.median(value)}, average = {(np.array(value) * np.array(weight) / np.sum(weight)).sum()}"
+                f"    Metric {key}: max = {np.max(value):.3f}"
+                f" | median = {np.median(value):.3f}, average = {(np.array(value) * np.array(weight) / np.sum(weight)).sum():.3f}"
+                f" | ({'/'.join(result_dict_all.keys())}) = "
+                f"{'/'.join(map(lambda x: f'{x[idx]:.3f}', result_dict_all.values()))}"
             )
 
     dist.barrier()

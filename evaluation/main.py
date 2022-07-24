@@ -19,12 +19,19 @@ def get_evaluation_args(parser):
 
     group.add_argument("--temperature", type=float, default=1.0,
                        help='Sampling temperature.')
-    group.add_argument("--greedy", action='store_true', default=False,
-                       help='Use greedy sampling.')
-    group.add_argument("--top_p", type=float, default=0.0,
-                       help='Top p sampling.')
-    group.add_argument("--top_k", type=int, default=0,
-                       help='Top k sampling.')
+    group.add_argument("--greedy", action='store_true', default=True,
+                       help='Use greedy sampling.')  # Default greedy
+
+    group.add_argument("--use-task-mask", action='store_true', default=False,
+                       help='Use task mask (gMASK) for generation')
+    group.add_argument("--prefix-match", action='store_true', default=False,
+                       help='prefix-match for generation evaluation')
+    group.add_argument("--generation-tolerance-length", type=int, default=1,
+                       help='Generation tolerance length for generation evaluation.')
+    group.add_argument("--no-eos-generation", action='store_true', default=False,
+                       help="Don't generate eos/eop for generation evaluation")
+    group.add_argument("--no-punctuation-generation", action='store_true', default=False,
+                       help="Don't generate punctuation for generation evaluation")
 
     return parser
 

@@ -8,10 +8,11 @@ import torch
 
 from megatron import get_tokenizer, get_args
 from scipy.linalg import block_diag
-from evaluation.metrics import accuracy_metric, qa_exact_match, qa_f1
+from evaluation.metrics import accuracy_metric, qa_exact_match, qa_prefix_match, qa_f1
 
 DEFAULT_METRICS = {
-    "gen": [("EM", qa_exact_match), ("F1", qa_f1)],
+    "gen": [("EM", qa_exact_match), ("PM", qa_prefix_match), ("F1", qa_f1)],
+    "gen-prefix": [("PM", qa_prefix_match)],
     "mul": [("accuracy", accuracy_metric)],
 }
 
@@ -94,17 +95,18 @@ def build_multiple_choice_sample(text, choices, is_single_token, unified_multita
     return item
 
 
-def build_generation_sample(text, max_seq_length):
+def build_generation_sample(text, max_seq_length, use_task_mask):
     tokenizer = get_tokenizer()
 
     dtype = np.int64
     sop_id = tokenizer.get_special_token("sop")
-    mask_id = tokenizer.get_special_token("MASK")
+    mask_id = tokenizer.get_special_token("gMASK") if use_task_mask else tokenizer.get_special_token("MASK")
 
     token = np.array(text, dtype=dtype)
 
     blank_filling = mask_id in text
     if blank_filling:
+        assert use_task_mask == False, "Task mask (gMASK) doesn't support blank filling"
         mask_position = text.index(mask_id)
     else:
         mask_position = len(token)
@@ -113,7 +115,8 @@ def build_generation_sample(text, max_seq_length):
     context_length = len(token)
 
     position_id = np.arange(0, max_seq_length, dtype=dtype)
-    position_id[context_length - 1 :] = mask_position
+    if not use_task_mask:
+        position_id[context_length - 1 :] = mask_position
 
     attention_mask = np.tril(np.ones((max_seq_length, max_seq_length), dtype=np.long))
     attention_mask[: context_length - 1, : context_length - 1] = 1
@@ -149,7 +152,7 @@ class ZeroShotDataset(torch.utils.data.Dataset):
         tokenizer = get_tokenizer()
         self.mask_id = tokenizer.get_special_token("MASK")
         self.gmask_id = tokenizer.get_special_token("gMASK")
-        # self.mask_id = self.gmask_id if self.use_gmask else self.tmask_id
+        self.use_task_mask = args.use_task_mask
         self.dtype = np.long
 
         self.unified_multitask_encoding = args.unified_multitask_encoding
@@ -199,6 +202,8 @@ class ZeroShotDataset(torch.utils.data.Dataset):
                     self.data.append({"text": text, "targets": targets, "task_type": "gen"})
 
         self.metrics = DEFAULT_METRICS[self.task_type]
+        if self.task_type == 'gen' and args.prefix_match:
+            self.metrics = DEFAULT_METRICS['gen-prefix']
 
     def __len__(self):
         return len(self.data)
@@ -215,7 +220,9 @@ class ZeroShotDataset(torch.utils.data.Dataset):
             sample["label"] = item["label"]
             return sample
         elif self.task_type == "gen":  # generative data
-            sample = build_generation_sample(item["text"], max_seq_length=self.max_seq_length)
+            sample = build_generation_sample(item["text"],
+                                             max_seq_length=self.max_seq_length,
+                                             use_task_mask=self.use_task_mask)
             sample["targets"] = [np.array(target, dtype=self.dtype) for target in item["targets"]]
             return sample
         else:

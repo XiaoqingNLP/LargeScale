@@ -53,6 +53,10 @@ def exact_match_score(prediction, ground_truth):
     return normalize_answer(prediction) == normalize_answer(ground_truth)
 
 
+def prefix_match_score(prediction, ground_truth):
+    return prediction.startswith(ground_truth)
+
+
 def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
     if not ground_truths:
         return 0.0
@@ -71,14 +75,18 @@ def qa_evaluate(predictions, examples, metric):
     for example, prediction in zip(examples, predictions):
         ground_truths = [tokenizer.decode(target) for target in example["targets"]]
         try:
-            prediction = tokenizer.decode(prediction)
+            prediction_text = tokenizer.decode(prediction)
         except:
-            prediction = ""
+            print(prediction)
+            assert False, "Unrecognized token"
         if ground_truths:
-            score += metric_max_over_ground_truths(metric, prediction, ground_truths)
+            score += metric_max_over_ground_truths(metric, prediction_text, ground_truths)
+            # if not prediction_text.startswith(ground_truths[0]):
+            # print_rank_last(f"ground: {example['targets'][0]} {ground_truths}, prediction: {prediction} {prediction_text} | example: {tokenizer.decode(example['text'])}")
     score = 100.0 * score / len(predictions)
     return score
 
 
 qa_exact_match = functools.partial(qa_evaluate, metric=exact_match_score)
+qa_prefix_match = functools.partial(qa_evaluate, metric=prefix_match_score)
 qa_f1 = functools.partial(qa_evaluate, metric=f1_score)

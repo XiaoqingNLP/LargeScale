@@ -99,4 +99,6 @@ def generate_text(model, batch, max_length=2048):
         batch["attention_mask"].to(device=torch.cuda.current_device()).bool().unsqueeze(1),
         batch["position_ids"].to(device=torch.cuda.current_device()).long(),
         maxlen=max_length - 1,
+        no_eos=args.no_eos_generation,
+        no_punctuation=args.no_punctuation_generation
     )
