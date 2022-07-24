@@ -3,20 +3,21 @@
 NUM_WORKERS=8
 NUM_GPUS_PER_WORKER=8
 HOST_FILE_PATH="/mnt/yrfs/aohan/nodelist2"
+#HOST_FILE_PATH="/thudm/LargeScale/wudao-1"
 OPTIONS_NCCL="NCCL_DEBUG=VERSION NCCL_IB_DISABLE=0 NCCL_NET_GDR_LEVEL=2 CUDA_LAUNCH_BLOCKING=0"
 
 TIMESTAMP=$(date +'%Y.%m.%d-%H:%M:%S')
 
 DATA_ROOT="/mnt/yrfs/aohan/data/superglue"
+#DATA_ROOT="/thudm/LargeScale/data/superglue"
 
 source $1 # model
 source $2 # task
 
 mkdir -p logs-p-tuning/${EXP_NAME}
 
-MICRO_BATCH_SIZE=8
+MICRO_BATCH_SIZE=4
 
-CHECKPOINT_PATH="/mnt/yrfs/aohan/checkpoints/glm-130B-tp/global_step49300"
 TENSORBOARD_PATH="runs-p-tuning/${EXP_NAME}"
 
 args="./tasks/main.py \
@@ -27,11 +28,12 @@ args="./tasks/main.py \
        --micro-batch-size ${MICRO_BATCH_SIZE} \
        --global-batch-size ${BATCH_SIZE} \
        --seq-length ${MAX_SEQ_LEN} \
-       --epochs ${EPOCH_SINGLE} \
-       --lr ${LR_SINGLE} \
+       --epochs ${EPOCH_PT} \
+       --lr ${LR_PT} \
        --tensorboard-dir ${TENSORBOARD_PATH} \
        --tensorboard-queue-size 5 \
        --optimizer adam \
+       --weight-decay 1.0e-4 \
        --tokenizer-type IceTokenizer \
        --prefix-prompt-length 16 \
        --finetune \
