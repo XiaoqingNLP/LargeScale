@@ -628,6 +628,7 @@ def _add_training_args(parser):
     group.add_argument('--apply-rotary-positional-embedding-kernel', action='store_true',
                        help='Use custom cuda kernel for rotary positional embedding.')
     group.add_argument('--use-hinge-cross-entropy-loss', action='store_true')
+    group.add_argument('--apply-int8-quantization', action='store_true', default=None)
 
     return parser
 

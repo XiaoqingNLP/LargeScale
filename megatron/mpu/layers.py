@@ -344,6 +344,15 @@ class ColumnParallelLinear(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
+        self.apply_int8_quantization = args.apply_int8_quantization
+        if self.apply_int8_quantization:
+            from bminf.kernels import gemm_calc_scale, gemm_round
+
+            self.weight_scale = gemm_calc_scale(self.weight)
+            self.weight_quant = gemm_round(self.weight, self.weight_scale)
+            self.weight_scale.requires_grad = False
+            self.weight_quant.requires_grad = False
+            self.weight_quant_iteration = -1
 
 
     def forward(self, input_):
@@ -352,7 +361,23 @@ class ColumnParallelLinear(torch.nn.Module):
         # Matrix multiply.
 
         bias = self.bias if not self.skip_bias_add else None
-        output_parallel = F.linear(input_parallel, self.weight, bias)
+        if self.apply_int8_quantization:
+            from bminf.kernels import gemm_calc_scale, gemm_round
+            from .quantization import INT8LinearFunction
+
+            args = get_args()
+            if args.iteration != self.weight_quant_iteration:
+                self.weight_scale = gemm_calc_scale(self.weight)
+                self.weight_quant = gemm_round(self.weight, self.weight_scale)
+                self.weight_scale.requires_grad = False
+                self.weight_quant.requires_grad = False
+                self.weight_quant_iteration = args.iteration
+
+            output_parallel = INT8LinearFunction.apply(input_parallel, self.weight, self.weight_quant, self.weight_scale)
+            if not self.skip_bias_add:
+                output_parallel = output_parallel + self.bias
+        else:
+            output_parallel = F.linear(input_parallel, self.weight, bias)
         if self.gather_output:
             # All-gather across the partitions.
             output = gather_from_tensor_model_parallel_region(output_parallel)
@@ -441,7 +466,15 @@ class RowParallelLinear(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
+        self.apply_int8_quantization = args.apply_int8_quantization
+        if self.apply_int8_quantization:
+            from bminf.kernels import gemm_calc_scale, gemm_round
 
+            self.weight_scale = gemm_calc_scale(self.weight)
+            self.weight_quant = gemm_round(self.weight, self.weight_scale)
+            self.weight_scale.requires_grad = False
+            self.weight_quant.requires_grad = False
+            self.weight_quant_iteration = -1
 
     def forward(self, input_):
         # Set up backprop all-reduce.
@@ -450,7 +483,23 @@ class RowParallelLinear(torch.nn.Module):
         else:
             input_parallel = scatter_to_tensor_model_parallel_region(input_)
         # Matrix multiply.
-        output_parallel = F.linear(input_parallel, self.weight)
+        if self.apply_int8_quantization:
+            from bminf.kernels import gemm_calc_scale, gemm_round
+            from .quantization import INT8LinearFunction
+
+            args = get_args()
+            if args.iteration != self.weight_quant_iteration:
+                self.weight_scale = gemm_calc_scale(self.weight)
+                self.weight_quant = gemm_round(self.weight, self.weight_scale)
+                self.weight_scale.requires_grad = False
+                self.weight_quant.requires_grad = False
+                self.weight_quant_iteration = args.iteration
+
+            output_parallel = INT8LinearFunction.apply(input_parallel, self.weight, self.weight_quant, self.weight_scale)
+            if not self.skip_bias_add:
+                output_parallel = output_parallel + self.bias
+        else:
+            output_parallel = F.linear(input_parallel, self.weight)
         # All-reduce across all the partitions.
         output_ = reduce_from_tensor_model_parallel_region(output_parallel)
         if not self.skip_bias_add:
