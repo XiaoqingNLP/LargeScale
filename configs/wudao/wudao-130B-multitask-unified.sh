@@ -38,8 +38,8 @@ OPTIMIZER_ARGS=" \
     --adam-beta1 0.9 \
     --adam-beta2 0.95 \
     --adam-eps 1e-8 \
-    --lr 4e-6 \
-    --min-lr 4e-7 \
+    --lr 3e-6 \
+    --min-lr 3e-7 \
     --override-lr-scheduler \
     --lr-decay-style cosine \
     --lr-decay-samples $LR_DECAY_SAMPLES \
@@ -110,7 +110,7 @@ gpt_options=" \
        --num-workers 1 \
        --load $CHECKPOINT_PATH \
        --save $CHECKPOINT_PATH \
-       --skip-train-iteration-range 701-800 2201-2300 2701-2800 3801-4000 \
+       --skip-train-iteration-range 701-800 2201-2300 2701-2800 3801-4000 6501-6600 6801-6900 7301-7400 7601-7800 7801-7900 8801-8900 9101-9200 \
        --abort-on-unmet-fused-kernel-constraints \
        --distributed-backend nccl \
        --checkpoint-activations \

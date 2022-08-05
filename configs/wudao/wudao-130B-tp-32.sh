@@ -1,5 +1,6 @@
 #! /bin/bash
 NAME="glm-130B-tp"
+EXP_NAME=${NAME}-${TIMESTAMP}
 
 TP_SIZE=32
 PP_SIZE=1
