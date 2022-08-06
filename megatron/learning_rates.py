@@ -133,7 +133,7 @@ class AnnealingLR(object):
                 self.lr_auto_warmup_steps[0] + self.lr_auto_warmup_steps[1]
         ):
             return max(
-                1e-7,
+                1e-8,
                 (self.min_lr + coeff * delta_lr)
                 * (iteration - self.lr_auto_warmup_steps[0])
                 / self.lr_auto_warmup_steps[1],
