@@ -50,8 +50,9 @@ class INT8LinearFunction(torch.autograd.Function):
         gemm_int8(
             quant_w.size(1), quant_w.size(0), quant_grad_f.size(0),
             1, 1,
-            False, False,
-            quant_w.data_ptr(), quant_grad_f.data_ptr(),
+            True, False,
+            # Here we need a handwritten transpose to enable TensorCore
+            quant_w.transpose(0, 1).contiguous().data_ptr(), quant_grad_f.data_ptr(),
             grad_input.data_ptr(),
             torch.cuda.current_stream().cuda_stream
         )
@@ -63,8 +64,9 @@ class INT8LinearFunction(torch.autograd.Function):
         gemm_int8(
             quant_x.size(1), quant_x.size(0), quant_grad_f.size(0),
             1, 1,
-            False, False,
-            quant_x.data_ptr(), quant_grad_f.data_ptr(),
+            True, False,
+            # Here we need a handwritten transpose to enable TensorCore
+            quant_x.transpose(0, 1).contiguous().data_ptr(), quant_grad_f.data_ptr(),
             grad_weight.data_ptr(),
             torch.cuda.current_stream().cuda_stream
         )
