@@ -269,6 +269,23 @@ class VocabParallelEmbedding(torch.nn.Module):
         return output
 
 
+def should_quantize(layer_number, iteration) -> bool:
+    args = get_args()
+    num_layers = args.num_layers
+
+    if args.int8_quantization_warmup_steps is None:
+        return True
+    else:
+        x1 = int(args.int8_quantization_warmup_steps[0])
+        x2 = int(args.int8_quantization_warmup_steps[1])
+        if iteration <= x1:
+            return False
+        elif iteration >= x1 + x2:
+            return True
+        else:
+            return num_layers * (iteration - x1) / x2 >= (num_layers - layer_number)
+
+
 class ColumnParallelLinear(torch.nn.Module):
     """Linear layer with column parallelism.
 
@@ -296,7 +313,7 @@ class ColumnParallelLinear(torch.nn.Module):
     def __init__(self, input_size, output_size, bias=True, gather_output=True,
                  init_method=init.xavier_normal_, stride=1,
                  keep_master_weight_for_test=False,
-                 skip_bias_add=False):
+                 skip_bias_add=False, layer_number=None):
         super(ColumnParallelLinear, self).__init__()
 
         # Keep input parameters
@@ -344,12 +361,14 @@ class ColumnParallelLinear(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
+        self.layer_number = layer_number
         self.apply_int8_quantization = args.apply_int8_quantization
         if self.apply_int8_quantization:
             from bminf.kernels import gemm_calc_scale, gemm_round
 
-            self.weight_scale = gemm_calc_scale(self.weight)
-            self.weight_quant = gemm_round(self.weight, self.weight_scale)
+            with torch.no_grad():
+                self.weight_scale = gemm_calc_scale(self.weight)
+                self.weight_quant = gemm_round(self.weight, self.weight_scale)
             self.weight_scale.requires_grad = False
             self.weight_quant.requires_grad = False
             self.weight_quant_iteration = -1
@@ -361,14 +380,15 @@ class ColumnParallelLinear(torch.nn.Module):
         # Matrix multiply.
 
         bias = self.bias if not self.skip_bias_add else None
-        if self.apply_int8_quantization:
+        args = get_args()
+        if self.apply_int8_quantization and should_quantize(self.layer_number, args.iteration):
             from bminf.kernels import gemm_calc_scale, gemm_round
             from .quantization import INT8LinearFunction
 
-            args = get_args()
             if args.iteration != self.weight_quant_iteration:
-                self.weight_scale = gemm_calc_scale(self.weight)
-                self.weight_quant = gemm_round(self.weight, self.weight_scale)
+                with torch.no_grad():
+                    self.weight_scale = gemm_calc_scale(self.weight)
+                    self.weight_quant = gemm_round(self.weight, self.weight_scale)
                 self.weight_scale.requires_grad = False
                 self.weight_quant.requires_grad = False
                 self.weight_quant_iteration = args.iteration
@@ -421,7 +441,7 @@ class RowParallelLinear(torch.nn.Module):
                  input_is_parallel=False,
                  init_method=init.xavier_normal_, stride=1,
                  keep_master_weight_for_test=False,
-                 skip_bias_add=False):
+                 skip_bias_add=False, layer_number=None):
         super(RowParallelLinear, self).__init__()
 
         # Keep input parameters
@@ -466,12 +486,14 @@ class RowParallelLinear(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
+        self.layer_number = layer_number
         self.apply_int8_quantization = args.apply_int8_quantization
         if self.apply_int8_quantization:
             from bminf.kernels import gemm_calc_scale, gemm_round
 
-            self.weight_scale = gemm_calc_scale(self.weight)
-            self.weight_quant = gemm_round(self.weight, self.weight_scale)
+            with torch.no_grad():
+                self.weight_scale = gemm_calc_scale(self.weight)
+                self.weight_quant = gemm_round(self.weight, self.weight_scale)
             self.weight_scale.requires_grad = False
             self.weight_quant.requires_grad = False
             self.weight_quant_iteration = -1
@@ -483,14 +505,16 @@ class RowParallelLinear(torch.nn.Module):
         else:
             input_parallel = scatter_to_tensor_model_parallel_region(input_)
         # Matrix multiply.
-        if self.apply_int8_quantization:
+        args = get_args()
+        if self.apply_int8_quantization and should_quantize(self.layer_number, args.iteration):
             from bminf.kernels import gemm_calc_scale, gemm_round
             from .quantization import INT8LinearFunction
 
             args = get_args()
             if args.iteration != self.weight_quant_iteration:
-                self.weight_scale = gemm_calc_scale(self.weight)
-                self.weight_quant = gemm_round(self.weight, self.weight_scale)
+                with torch.no_grad():
+                    self.weight_scale = gemm_calc_scale(self.weight)
+                    self.weight_quant = gemm_round(self.weight, self.weight_scale)
                 self.weight_scale.requires_grad = False
                 self.weight_quant.requires_grad = False
                 self.weight_quant_iteration = args.iteration

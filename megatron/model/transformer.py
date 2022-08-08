@@ -70,7 +70,7 @@ class ParallelMLP(MegatronModule):
     applied.
     """
 
-    def __init__(self, init_method, output_layer_init_method):
+    def __init__(self, init_method, output_layer_init_method, layer_number):
         super(ParallelMLP, self).__init__()
         args = get_args()
 
@@ -95,7 +95,8 @@ class ParallelMLP(MegatronModule):
             2 * args.ffn_hidden_size if args.glu_activation else args.ffn_hidden_size,
             gather_output=False,
             init_method=init_method,
-            skip_bias_add=True)
+            skip_bias_add=True,
+            layer_number=layer_number)
 
         if args.deepnorm and args.glu_activation:
             import deepspeed.runtime.activation_checkpointing.checkpointing as ds_checkpointing
@@ -128,7 +129,8 @@ class ParallelMLP(MegatronModule):
             args.hidden_size,
             input_is_parallel=True,
             init_method=output_layer_init_method,
-            skip_bias_add=True)
+            skip_bias_add=True,
+            layer_number=layer_number)
 
 
     def forward(self, hidden_states):
@@ -193,7 +195,8 @@ class ParallelAttention(MegatronModule):
                 args.hidden_size,
                 3 * projection_size,
                 gather_output=False,
-                init_method=init_method)
+                init_method=init_method,
+                layer_number=layer_number)
             self.prefix_prompt_length = args.prefix_prompt_length
             self.add_prefix_prompt = False
             if args.prefix_prompt_length is not None and (
@@ -273,6 +276,7 @@ class ParallelAttention(MegatronModule):
             if args.deepnorm
             else output_layer_init_method,
             skip_bias_add=True,
+            layer_number=layer_number
         )
 
         if deepspeed.checkpointing.is_configured():
@@ -648,7 +652,7 @@ class ParallelTransformerLayer(MegatronModule):
                 eps=args.layernorm_epsilon)
 
         # MLP
-        self.mlp = ParallelMLP(init_method, output_layer_init_method)
+        self.mlp = ParallelMLP(init_method, output_layer_init_method, layer_number)
 
         # Alibi
         if args.position_embedding_type == PositionEmbeddingType.alibi:

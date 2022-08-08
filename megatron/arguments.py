@@ -332,6 +332,14 @@ def parse_args(extra_args_provider=None, defaults={},
     else:
         args.lr_auto_warmup_steps = None
 
+    if args.int8_quantization_warmup_steps and len(args.int8_quantization_warmup_steps) > 0:
+        assert args.apply_int8_quantization
+        assert len(args.int8_quantization_warmup_steps) == 2, 'len(int8-quantization-warmup-steps) != 2'
+        args.int8_quantization_warmup_steps[0] = int(args.int8_quantization_warmup_steps[0])
+        args.int8_quantization_warmup_steps[1] = int(args.int8_quantization_warmup_steps[1])
+    else:
+        args.int8_quantization_warmup_steps = None
+
     if args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence:
         assert args.finetune or args.micro_batch_size == 1
 
@@ -629,6 +637,8 @@ def _add_training_args(parser):
                        help='Use custom cuda kernel for rotary positional embedding.')
     group.add_argument('--use-hinge-cross-entropy-loss', action='store_true')
     group.add_argument('--apply-int8-quantization', action='store_true', default=None)
+    group.add_argument('--int8-quantization-warmup-steps', nargs='*', default=None,
+                       help='--int8-quantization-warmup-steps <x1> <x2>')
 
     return parser
 
