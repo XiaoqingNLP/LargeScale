@@ -196,7 +196,14 @@ class DeepSpeedCheckpoint(object):
                 if self.original_tp_degree >= self.tp_degree:
                     if key.startswith('mlp.dense_h_to_4h') and self.glu:
                         if self.original_tp_degree > self.tp_degree:
-                            raise NotImplementedError
+                            num_part = self.original_tp_degree // self.tp_degree
+                            assert len(sd_list) == num_part
+                            part1, part2 = [], []
+                            for i in range(len(sd_list)):
+                                chunks = torch.chunk(sd_list[i][key], 2, dim=cat_dim)
+                                part1.append(chunks[0])
+                                part2.append(chunks[1])
+                            merged_sd[key] = torch.cat(part1 + part2, dim=cat_dim)
                         else:
                             merged_sd[key] = sd_list[0][key]
                     else:
