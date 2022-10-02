@@ -340,7 +340,7 @@ def parse_args(extra_args_provider=None, defaults={},
     else:
         args.int8_quantization_warmup_steps = None
 
-    if args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence:
+    if args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence > 1:
         assert args.finetune or args.micro_batch_size == 1
 
     if args.load_deepspeed_model_only:
@@ -473,6 +473,8 @@ def _add_logging_args(parser):
 
     group.add_argument('--log-params-norm', action='store_true',
                        help='If set, calculate and log parameters norm.')
+    group.add_argument('--log-params-inf-norm-by-layer', action='store_true',
+                       help='If set, calculate and log parameters inf norm by layer.')
     group.add_argument('--log-gradient-norm-by-layer', action='store_true',
                        help='If set, calculate and log grad norm by layer.')
     group.add_argument('--log-model-update', action='store_true',

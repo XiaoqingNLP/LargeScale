@@ -489,3 +489,15 @@ def get_grad_norm_by_layer(model, inv_scale, norm_type=2.0):
         print(grad_norm_by_layer)
 
     return grad_norm_by_layer
+
+
+def calc_params_inf_norm_by_layer(model):
+    try:
+        language_model: torch.Module = model.module.module.language_model
+    except:
+        language_model: torch.Module = model.module
+    params_inf_norm_by_layer = {}
+    for name, param in language_model.named_parameters():
+        if 'bias' not in name and 'layernorm' not in name:
+            params_inf_norm_by_layer[name] = param.abs().max()
+    return params_inf_norm_by_layer

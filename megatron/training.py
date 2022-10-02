@@ -51,7 +51,7 @@ from megatron.utils import check_adlr_autoresume_termination, get_parameters_in_
 from megatron.utils import unwrap_model, found_kill_switch
 from megatron.data.data_samplers import build_pretraining_data_loader
 from megatron.utils import calc_params_l2_norm, store_initial_model, calc_model_update
-from megatron.utils import get_grad_norm_by_layer
+from megatron.utils import get_grad_norm_by_layer, calc_params_inf_norm_by_layer
 from megatron.schedules import forward_backward_no_pipelining
 from megatron.schedules import forward_backward_pipelining_without_interleaving
 from megatron.schedules import forward_backward_pipelining_with_interleaving
@@ -448,10 +448,10 @@ def train_step(forward_step_func, data_iterator,
         skipped_iter = 0
         grad_norm = model[0].get_global_grad_norm()
         num_zeros_in_grad = 0
-        if loss.size(0) > 1:
+        if len(loss.shape) > 0 and loss.size(0) > 1:
             return {'lm loss' : loss[0], 'bert loss': loss[1], 'gpt loss': loss[2], 'multitask loss': loss[3]}, skipped_iter, grad_norm, num_zeros_in_grad, None
         else:
-            return {'lm loss' : loss[0]}, skipped_iter, grad_norm, num_zeros_in_grad, None
+            return {'lm loss' : loss}, skipped_iter, grad_norm, num_zeros_in_grad, None
 
     # Set grad to zero.
     if not args.deepspeed:
@@ -551,7 +551,7 @@ def train_step(forward_step_func, data_iterator,
 def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                  loss_scale, report_memory_flag, skipped_iter,
                  grad_norm, params_norm, num_zeros_in_grad,
-                 model_update=None, grad_norm_by_layer=None, model=None):
+                 model_update=None, grad_norm_by_layer=None, params_inf_norm_by_layer=None, model=None):
     """Log training information such as losses, timing, ...."""
     args = get_args()
     timers = get_timers()
@@ -678,6 +678,9 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
         if grad_norm_by_layer is not None:
             for name, norm in grad_norm_by_layer.items():
                 writer.add_scalar(f'grad-norm/grad-norm-{name}', norm, iteration)
+        if params_inf_norm_by_layer is not None:
+            for name, norm in params_inf_norm_by_layer.items():
+                writer.add_scalar(f'param-inf-norm/{name}', norm, iteration)
         if args.curriculum_learning:
             writer.add_scalar('curriculum_seqlen', args.curriculum_seqlen,
                               iteration)
@@ -923,6 +926,9 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
         params_norm = None
         if args.log_params_norm:
             params_norm = calc_params_l2_norm(model)
+        params_inf_norm_by_layer = None
+        if args.log_params_inf_norm_by_layer:
+            params_inf_norm_by_layer = calc_params_inf_norm_by_layer(model[0])
         model_update = None
         if args.log_model_update:
             model_update = calc_model_update(model)
@@ -931,7 +937,7 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
                                           iteration, loss_scale,
                                           report_memory_flag, skipped_iter,
                                           grad_norm, params_norm, num_zeros_in_grad,
-                                          model_update, grad_norm_by_layer, model)
+                                          model_update, grad_norm_by_layer, params_inf_norm_by_layer, model)
 
         # Autoresume
         if args.adlr_autoresume and \
