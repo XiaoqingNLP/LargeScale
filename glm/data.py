@@ -72,13 +72,16 @@ def build_train_valid_test_datasets(
     tokenizer = get_tokenizer()
 
     collator = GLMPreprocessor(
+        tokenizer=tokenizer,
         eod_id=tokenizer.get_special_token("eod"),
         mask_id=tokenizer.get_special_token("MASK"),
+        smask_id=tokenizer.get_special_token("sMASK"),
         gmask_id=tokenizer.get_special_token("gMASK"),
         sop_id=tokenizer.get_special_token("sop"),
         eop_id=tokenizer.get_special_token("eop"),
         max_seq_length=seq_length,
         aggregated_samples_per_sequence=aggregated_samples_per_sequence,
+        sent_prob=args.sent_prob,
         gpt_prob=args.gpt_prob,
         short_seq_prob=args.short_seq_prob,
         single_span_prob=args.single_span_prob,
