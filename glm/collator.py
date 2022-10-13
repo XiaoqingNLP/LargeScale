@@ -284,7 +284,10 @@ class GLMPreprocessor:
                         last_index = i + 1
                 single_span = rng.random() < self.single_span_prob
                 if single_span:
-                    block_spans = rng.sample(sentence_spans, 1)
+                    if sentence_spans:
+                        block_spans = rng.sample(sentence_spans, 1)
+                    else:
+                        block_spans = []
                 else:
                     rng.shuffle(sentence_spans)
                     block_spans, block_length = [], 0
