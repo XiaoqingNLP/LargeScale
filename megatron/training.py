@@ -163,20 +163,20 @@ def pretrain(train_valid_test_dataset_provider,
         train_data_iterator, valid_data_iterator, test_data_iterator = build_train_valid_test_data_iterators(
                 train_valid_test_dataset_provider)
 
-    if args.data_path is not None and len(args.data_path) > 1:
-        prefixes, weights = analyze_data_prefix(args.data_path)
-        setattr(args, "data_prefixes", prefixes)
-        setattr(args, "data_weights", weights)
-    elif args.train_weighted_split_paths is not None and len(args.train_weighted_split_paths[0]) > 1:
-        paths = args.train_weighted_split_paths[0]
-        weights = args.train_weighted_split_weights[0]
-        data_prefix = [j for i in [[w,p] for w,p in zip(weights, paths)] for j in i]
-        prefixes, weights = analyze_data_prefix(data_prefix)
-        setattr(args, "data_prefixes", prefixes)
-        setattr(args, "data_weights", weights)
-    else:
-        setattr(args, "data_prefixes", None)
-        setattr(args, "data_weights", None)
+    # if args.data_path is not None and len(args.data_path) > 1:
+    #     prefixes, weights = analyze_data_prefix(args.data_path)
+    #     setattr(args, "data_prefixes", prefixes)
+    #     setattr(args, "data_weights", weights)
+    # elif args.train_weighted_split_paths is not None and len(args.train_weighted_split_paths[0]) > 1:
+    #     paths = args.train_weighted_split_paths[0]
+    #     weights = args.train_weighted_split_weights[0]
+    #     data_prefix = [j for i in [[w,p] for w,p in zip(weights, paths)] for j in i]
+    #     prefixes, weights = analyze_data_prefix(data_prefix)
+    #     setattr(args, "data_prefixes", prefixes)
+    #     setattr(args, "data_weights", weights)
+    # else:
+    #     setattr(args, "data_prefixes", None)
+    #     setattr(args, "data_weights", None)
 
     timers('train/valid/test-data-iterators-setup').stop()
     print_datetime('after dataloaders are built')
@@ -449,7 +449,7 @@ def train_step(forward_step_func, data_iterator,
         grad_norm = model[0].get_global_grad_norm()
         num_zeros_in_grad = 0
         if len(loss.shape) > 0 and loss.size(0) > 1:
-            return {'lm loss' : loss[0], 'bert loss': loss[1], 'gpt loss': loss[2], 'multitask loss': loss[3]}, skipped_iter, grad_norm, num_zeros_in_grad, None
+            return {'lm loss' : loss[0], 'bert loss': loss[1], 'gpt loss': loss[2], 'multitask loss': loss[3], 'sentence loss': loss[4]}, skipped_iter, grad_norm, num_zeros_in_grad, None
         else:
             return {'lm loss' : loss}, skipped_iter, grad_norm, num_zeros_in_grad, None
 

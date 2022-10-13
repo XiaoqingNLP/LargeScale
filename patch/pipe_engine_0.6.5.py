@@ -551,7 +551,7 @@ class PipelineEngine(DeepSpeedEngine):
 
     def _aggregate_total_loss(self):
         # Scale loss, average among DP ranks, and bcast loss to the rest of my DP group
-        LOSS_TYPE = 3
+        LOSS_TYPE = 4
         if self.is_last_stage():
             loss_all = torch.tensor(self.loss_all).to(self.device)
             input_types = torch.concat(self.input_types).to(self.device).squeeze(1)

@@ -306,7 +306,7 @@ class GLMPreprocessor:
                     position_ids = position_ids[0]
                 division = np.array([division], dtype=int)
                 sequences.append((tokens, targets, loss_masks, position_ids, division))
-            return *self._pack_samples(sequences), 0
+            return *self._pack_samples(sequences), 3
         elif task_rand < self.bert_prob + self.sent_prob:
             sequences = []
             assert self.max_seq_length % self.aggregated_samples_per_sequence == 0

@@ -1167,6 +1167,7 @@ def _add_glm_args(parser):
     group = parser.add_argument_group("GLM", "GLM configurations")
     group.add_argument('--glm', action='store_true', help="whether use the BlockLM pre-training")
     group.add_argument("--gpt-prob", type=float, default=0.0)
+    group.add_argument("--sent-prob", type=float, default=0.0)
     # group.add_argument("--short-seq-prob", type=float, default=0.02)
     group.add_argument("--single-span-prob", type=float, default=0.02)
     # group.add_argument("--mask-ratio", type=float, default=0.15)
