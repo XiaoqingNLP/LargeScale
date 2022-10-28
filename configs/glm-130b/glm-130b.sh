@@ -2,11 +2,11 @@
 
 DATA_PATH="/thudm/LargeScale/merge"
 MULTITASK_DATA_PATH="/thudm/LargeScale/data/multitask_0601"
-NAME="wudao-130B"
+NAME="GLM-130B"
 
 EXP_NAME=${NAME}-${TIMESTAMP}
 CHECKPOINT_PATH="/thudm/LargeScale/checkpoints/${NAME}"
-TENSORBOARD_PATH="runs/wudao/${NAME}"
+TENSORBOARD_PATH="runs/glm-130b/${NAME}"
 
 config_json="./ds-configs/${EXP_NAME}/ds_config.json"
 
