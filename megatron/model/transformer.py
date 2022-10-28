@@ -26,7 +26,7 @@ from megatron.enums import AttnMaskType, LayerType, AttnType, PositionEmbeddingT
 from megatron.model.fused_layer_norm import MixedFusedLayerNorm as LayerNorm
 from megatron.model.fused_softmax import FusedScaleMaskSoftmax
 from megatron.model.fused_bias_gelu import bias_gelu_impl
-from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, get_deepnorm_coefficients
+from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu, get_deepnorm_coefficients, init_method_normal
 from functools import partial
 
 import deepspeed
@@ -34,7 +34,8 @@ import deepspeed
 from .glu_activations import GLU_ACTIVATIONS
 from .positional_embeddings import RotaryEmbedding
 from .positional_embeddings import apply_rotary_pos_emb_torch, apply_rotary_pos_emb, apply_rotary_pos_emb_fused, \
-    apply_rotary_pos_emb_index_torch, apply_rotary_pos_emb_index, apply_rotary_pos_emb_index_fused
+    apply_rotary_pos_emb_index_torch, apply_rotary_pos_emb_index, apply_rotary_pos_emb_index_fused, \
+    apply_rotary_pos_emb_index_single
 from .gau import GatedAttentionUnit
 
 # flags required to enable jit fusion kernels
@@ -69,7 +70,7 @@ class ParallelMLP(MegatronModule):
     applied.
     """
 
-    def __init__(self, init_method, output_layer_init_method):
+    def __init__(self, init_method, output_layer_init_method, layer_number):
         super(ParallelMLP, self).__init__()
         args = get_args()
 
@@ -94,7 +95,8 @@ class ParallelMLP(MegatronModule):
             2 * args.ffn_hidden_size if args.glu_activation else args.ffn_hidden_size,
             gather_output=False,
             init_method=init_method,
-            skip_bias_add=True)
+            skip_bias_add=True,
+            layer_number=layer_number)
 
         if args.deepnorm and args.glu_activation:
             import deepspeed.runtime.activation_checkpointing.checkpointing as ds_checkpointing
@@ -127,7 +129,8 @@ class ParallelMLP(MegatronModule):
             args.hidden_size,
             input_is_parallel=True,
             init_method=output_layer_init_method,
-            skip_bias_add=True)
+            skip_bias_add=True,
+            layer_number=layer_number)
 
 
     def forward(self, hidden_states):
@@ -183,6 +186,7 @@ class ParallelAttention(MegatronModule):
         self.num_attention_heads_per_partition = mpu.divide(
             args.num_attention_heads, world_size)
 
+        self.rotary_embedding_2d = args.rotary_embedding_2d
         self.apply_rotary_positional_embedding_kernel = args.apply_rotary_positional_embedding_kernel
 
         # Strided linear layer.
@@ -191,7 +195,21 @@ class ParallelAttention(MegatronModule):
                 args.hidden_size,
                 3 * projection_size,
                 gather_output=False,
-                init_method=init_method)
+                init_method=init_method,
+                layer_number=layer_number)
+            self.prefix_prompt_length = args.prefix_prompt_length
+            self.add_prefix_prompt = False
+            if args.prefix_prompt_length is not None and (
+                    args.prefix_prompt_num_layers is None or layer_number <= args.prefix_prompt_num_layers):
+                self.add_prefix_prompt = True
+                self.prefix_prompt_length = args.prefix_prompt_length
+                self.prefix_prompts = torch.nn.Parameter(
+                    torch.empty(2 * self.prefix_prompt_length * self.num_attention_heads_per_partition,
+                                self.hidden_size_per_attention_head, device=torch.cuda.current_device(),
+                                dtype=args.params_dtype)
+                )
+                mpu.layers._initialize_affine_weight_gpu(self.prefix_prompts,
+                                                         init_method_normal(args.prefix_prompt_init_std), 0)
             if args.deepnorm:
                 import deepspeed.runtime.activation_checkpointing.checkpointing as ds_checkpointing
                 if ds_checkpointing.is_configured():
@@ -258,6 +276,7 @@ class ParallelAttention(MegatronModule):
             if args.deepnorm
             else output_layer_init_method,
             skip_bias_add=True,
+            layer_number=layer_number
         )
 
         if deepspeed.checkpointing.is_configured():
@@ -267,7 +286,9 @@ class ParallelAttention(MegatronModule):
 
         if self.position_embedding_type == PositionEmbeddingType.rotary:
             self.rotary_emb = RotaryEmbedding(
-                self.hidden_size_per_attention_head,
+                self.hidden_size_per_attention_head // 2
+                if self.rotary_embedding_2d
+                else self.hidden_size_per_attention_head,
                 base=10000,
                 precision=args.params_dtype,
                 learnable=args.learnable_rotary_embedding)
@@ -327,6 +348,81 @@ class ParallelAttention(MegatronModule):
             query_layer = query_layer.view(*new_tensor_shape)
 
         # ==================================
+        # Rotary embeddings
+        # ==================================
+
+        if self.position_embedding_type == PositionEmbeddingType.rotary:
+            # q, k: [sq, b, np, hn]
+            if position_ids is not None:
+                apply_rotary_fn = (
+                    apply_rotary_pos_emb_index_fused
+                    if self.apply_rotary_positional_embedding_kernel
+                    else apply_rotary_pos_emb_index_torch
+                    if self.bf16
+                    else apply_rotary_pos_emb_index
+                )
+                if self.rotary_embedding_2d:
+                    assert args.add_prefix_prompt == False
+                    q1, q2 = query_layer.chunk(2, dim=(query_layer.ndim - 1))
+                    k1, k2 = key_layer.chunk(2, dim=(key_layer.ndim - 1))
+                    cos, sin = self.rotary_emb(q1, seq_len=position_ids.max() + 1)
+                    position_ids, block_position_ids = position_ids[0].transpose(0, 1), position_ids[1].transpose(0, 1)
+                    q1, k1 = apply_rotary_fn(q1, k1, cos, sin, position_ids)
+                    q2, k2 = apply_rotary_fn(q2, k2, cos, sin, block_position_ids)
+                    query_layer = torch.concat([q1, q2], dim=(q1.ndim - 1))
+                    key_layer = torch.concat([k1, k2], dim=(k1.ndim - 1))
+                else:
+                    if self.add_prefix_prompt:
+                        position_ids = position_ids + self.prefix_prompt_length
+
+                    # [b, sq] -> [sq, b]
+                    position_ids = position_ids.transpose(0, 1)
+                    cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
+                    query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
+
+                    if self.add_prefix_prompt:
+                        assert not self.bf16
+                        batch_size = hidden_states.size(1)
+                        # key
+                        prefix_key, prefix_value = self.prefix_prompts.reshape(2, self.prefix_prompt_length,
+                                                                               self.num_attention_heads_per_partition,
+                                                                               self.hidden_size_per_attention_head)
+                        prefix_key = prefix_key.unsqueeze(1).expand(-1, batch_size, -1, -1)
+                        prefix_position_ids = torch.arange(self.prefix_prompt_length, dtype=position_ids.dtype,
+                                                           device=position_ids.device)
+                        prefix_position_ids = prefix_position_ids.unsqueeze(0).expand(batch_size, -1)
+                        prefix_position_ids = prefix_position_ids.transpose(0, 1)
+                        prefix_key = apply_rotary_pos_emb_index_single(prefix_key, cos, sin, prefix_position_ids)
+                        key_layer = torch.cat((prefix_key, key_layer), dim=0)
+
+                        # value
+                        prefix_value = prefix_value.unsqueeze(1).expand(-1, batch_size, -1, -1)
+                        value_layer = torch.cat((prefix_value, value_layer), dim=0)
+
+                        # attention_mask
+                        prefix_attention_mask = attention_mask.new_zeros(
+                            (*attention_mask.shape[:3], self.prefix_prompt_length))
+                        attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=-1)
+            else:
+                assert args.add_prefix_prompt == False
+
+                apply_rotary_fn = (
+                    apply_rotary_pos_emb_fused
+                    if self.apply_rotary_positional_embedding_kernel
+                    else apply_rotary_pos_emb_torch
+                    if self.bf16
+                    else apply_rotary_pos_emb
+                )
+
+                seq_len = key_layer.shape[0]
+                offset = 0
+                if layer_past is not None and layer_past.numel() > 0:
+                    offset = layer_past[0].shape[0]
+                    seq_len += offset
+                cos, sin = self.rotary_emb(value_layer, seq_len=seq_len)
+                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, offset=offset)
+
+        # ==================================
         # Adjust key and value for inference
         # ==================================
 
@@ -366,37 +462,6 @@ class ParallelAttention(MegatronModule):
                 device=torch.cuda.current_device())
         else:
             matmul_result = alibi[:output_size[0]*output_size[1], :, :output_size[3]] if alibi.size(1) == 1 else alibi
-
-        # Rotary embeddings
-        if self.position_embedding_type == PositionEmbeddingType.rotary:
-            if position_ids is not None:
-                apply_rotary_fn = (
-                    apply_rotary_pos_emb_index_fused
-                    if self.apply_rotary_positional_embedding_kernel
-                    else apply_rotary_pos_emb_index_torch
-                    if self.bf16
-                    else apply_rotary_pos_emb_index
-                )
-                # [b, sq] -> [sq, b]
-                position_ids = position_ids.transpose(0, 1)
-                cos, sin = self.rotary_emb(value_layer, seq_len=position_ids.max() + 1)
-                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, position_ids)
-            else:
-                apply_rotary_fn = (
-                    apply_rotary_pos_emb_fused
-                    if self.apply_rotary_positional_embedding_kernel
-                    else apply_rotary_pos_emb_torch
-                    if self.bf16
-                    else apply_rotary_pos_emb
-                )
-
-                seq_len = key_layer.shape[0]
-                offset = 0
-                if layer_past is not None and layer_past.numel() > 0:
-                    offset = layer_past[0].shape[0]
-                    seq_len += offset
-                cos, sin = self.rotary_emb(value_layer, seq_len=seq_len)
-                query_layer, key_layer = apply_rotary_fn(query_layer, key_layer, cos, sin, offset=offset)
 
         # Raw attention scores. [b * np, sq, sk]
         if alibi is None:
@@ -587,7 +652,7 @@ class ParallelTransformerLayer(MegatronModule):
                 eps=args.layernorm_epsilon)
 
         # MLP
-        self.mlp = ParallelMLP(init_method, output_layer_init_method)
+        self.mlp = ParallelMLP(init_method, output_layer_init_method, layer_number)
 
         # Alibi
         if args.position_embedding_type == PositionEmbeddingType.alibi:
@@ -857,9 +922,13 @@ class ParallelTransformer(MegatronModule):
         self.checkpoint_num_layers = args.checkpoint_num_layers
 
         # Number of layers.
-        assert args.num_layers % mpu.get_pipeline_model_parallel_world_size() == 0, \
+        assert (args.num_layers + 2) % mpu.get_pipeline_model_parallel_world_size() == 0, \
             'num_layers must be divisible by pipeline_model_parallel_size'
         self.num_layers = args.num_layers // mpu.get_pipeline_model_parallel_world_size()
+        if mpu.get_pipeline_model_parallel_world_size() > 2:
+            self.num_layers = (args.num_layers + 2) // mpu.get_pipeline_model_parallel_world_size()
+            if mpu.is_pipeline_first_stage() or mpu.is_pipeline_last_stage():
+                self.num_layers -= 1
 
         # Transformer layers.
         def build_layer(layer_number):

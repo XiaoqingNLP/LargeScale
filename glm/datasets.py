@@ -10,6 +10,7 @@
 import os
 import sys
 import math
+import torch
 import random
 
 import numpy as np
@@ -60,7 +61,7 @@ class BinaryDataset(Dataset):
             with open(path, 'r') as fid:
                 nbytes = fid.seek(0, 2)
                 flen = fid.tell() // self.dtype.itemsize
-            self.bin = np.memmap(path, dtype=self.dtype, shape=(flen // length_per_sample, length_per_sample))
+            self.bin = np.memmap(path, mode='r', dtype=self.dtype, shape=(flen // length_per_sample, length_per_sample))
 
     def __len__(self):
         return self.bin.shape[0]
@@ -133,18 +134,63 @@ class RandomMappingDataset(Dataset):
     Dataset wrapper to randomly mapping indices to original order.
     Will also enlarge the length
     '''
-    def __init__(self, ds, scale=200, **kwargs):
+    def __init__(self, ds, scale=200, seed=None, **kwargs):
         self.wrapped_data = ds
         self.scale = scale
+        self.seed = random.Random(seed).randint(0, 2**32-1) if seed is not None else 0
 
     def __len__(self):
         return len(self.wrapped_data) * self.scale
 
     def __getitem__(self, index):
         rng = random.Random(index)
-        rng = np.random.RandomState(seed=[rng.randint(0, 2**32-1) for _ in range(16)])
+        rng = np.random.RandomState(seed=[self.seed ^ rng.randint(0, 2**32-1) for _ in range(16)])
         index = rng.randint(len(self.wrapped_data))
         return self.wrapped_data[index]
+
+
+class TransformingDataset(Dataset):
+    '''
+    Dataset wrapper to gradually change one to another during training
+    ds1 -> ds2 in [start, end], calculate iteration based on consumed samples
+    assume ds1 or ds2 is random mapping dataset
+    '''
+    def __init__(self, ds1, ds2, start, end, iteration, local_batch_size, if_print=False):
+        self.ds1 = ds1
+        self.ds2 = ds2
+        self.start = start
+        self.end = end
+        self.init_iteration = iteration
+        self.consumed_samples = 0
+        self.local_batch_size = local_batch_size
+        self.if_print = if_print
+        if if_print:
+            print(f'transforming [{start}, {end}), local-batch-size: {local_batch_size}')
+
+    def __len__(self):
+        return len(self.ds1)
+
+    def __getitem__(self, index):
+        iteration = self.init_iteration + (self.consumed_samples) / self.local_batch_size
+        self.consumed_samples += 1
+        if self.if_print and int((self.consumed_samples - 1) / self.local_batch_size) != \
+                int((self.consumed_samples) / self.local_batch_size):
+            print(f'[Rank {torch.distributed.get_rank()}] iteration: {int(iteration)}')
+
+        ratio = 0
+        if iteration >= self.end:
+            ratio = 1
+        elif self.start <= iteration < self.end:
+            ratio = (iteration - self.start) / (self.end - self.start)
+
+        rng = random.Random(index)
+        rng = np.random.RandomState(seed=[rng.randint(0, 2**32-1) for _ in range(16)])
+        if rng.random() < 1 - ratio:
+            # print(f'[Rank {torch.distributed.get_rank()}] iteration: {iteration}, ratio: {ratio}, get ds1 {index} / {len(self.ds1)}')
+            return self.ds1[index]
+        else:
+            # print(f'[Rank {torch.distributed.get_rank()}] iteration: {iteration}, ratio: {ratio}, get ds2 {index}')
+            return self.ds2[index]
 
 
 class BlockedRandomSplitDataset(Dataset):
@@ -185,6 +231,38 @@ class AggregatedDataset(Dataset):
     def __getitem__(self, index):
         return self.process_fn([self.wrapped_data[index * self.aggregated_sample_num + offset]
                     for offset in range(self.aggregated_sample_num)])
+
+
+class RandomGreedilyAggregatedDataset(Dataset):
+    '''
+    Random dataset aggregated dataset with greedy concat strategy
+    '''
+    def __init__(self, ds, max_seq_length, process_fn, seed=None):
+        self.wrapped_data = ds
+        self.max_seq_length = max_seq_length
+        self.process_fn = process_fn
+        self.seed = random.Random(seed).randint(0, 2**32-1) if seed is not None else 0
+
+    def __len__(self):
+        return len(self.wrapped_data)
+
+    def __getitem__(self, index):
+        rng = random.Random(index)
+        rng = np.random.RandomState(seed=[self.seed ^ rng.randint(0, 2 ** 32 - 1) for _ in range(16)])
+        items, length = [], 0
+
+        while True:
+            index = rng.randint(len(self.wrapped_data))
+            item = self.wrapped_data[index]
+            new_length = len(item[0]) + len(item[1]) + 2
+            if length + new_length > self.max_seq_length:
+                if length == 0:  # only one example, so we must append it then truncate
+                    items.append(item)
+                break
+            length += new_length
+            items.append(item)
+
+        return self.process_fn(items)
 
 
 def split_ds(ds, split=[.8,.2,.0], block_size = 10000, seed=1130):

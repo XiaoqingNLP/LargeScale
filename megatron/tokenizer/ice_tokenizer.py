@@ -21,8 +21,8 @@ class _IceTokenizer(AbstractTokenizer):
         except ImportError:
             pass
         self.num_tokens = 150000
-        self.set_special_tokens(['MASK', 'gMASK', 'sMASK', 'eod', 'sop', 'eop', 'ENC', 'dBLOCK'])
-        self.sentence_end_decoder = {20007: '.', 20031: '？', 20035: '！', 20027: '；', 20012: ':', 83823: '。', 145670: '…'}
+        max_len = 80
+        self.set_special_tokens(['MASK', 'gMASK', 'sMASK', 'eod', 'sop', 'eop', 'ENC', 'dBLOCK'] + ['<t>'] + [f'<blank_{i}>' for i in range(2, max_len+1)])
 
         self.special_tokens['eos'] = 20002
         self.special_tokens_decoder[20002] = '</s>'
@@ -44,9 +44,6 @@ class _IceTokenizer(AbstractTokenizer):
 
     def get_special_token(self, token):
         return self.special_tokens[token]
-
-    def contains_sentence_end(self, idx):
-        return idx in self.sentence_end_decoder
 
     def IdToToken(self, idx):
         if idx == 0:
@@ -82,8 +79,12 @@ class _IceTokenizer(AbstractTokenizer):
         return self.tokenizer.encode(text)
 
     def detokenize(self, token_ids):
+        return "".join([self.IdToToken(t) for t in token_ids])
+        # return self.tokenizer.decode(token_ids)
+
+    def decode(self, token_ids):
         return self.tokenizer.decode(token_ids)
 
     @property
     def eod(self):
-        return self.get_special_token('eod')
+        return self.get_special_token('eos')

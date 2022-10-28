@@ -31,6 +31,17 @@ def parallel_lm_logits(input_, word_embeddings_weight, parallel_output,
     """LM logits using word embedding weights."""
     # Parallel logits.
     input_parallel = mpu.copy_to_tensor_model_parallel_region(input_)
+    args = get_args()
+    if args.shrink_logit_embedding_gradient:
+        if hasattr(args, 'iteration'):
+            alpha = get_shrink_embedding_gradient_alpha(args.iteration + 1)
+        else:
+            alpha = args.shrink_embedding_gradient_alpha
+        word_embeddings_weight = word_embeddings_weight if alpha == 1.0 \
+            else (
+                word_embeddings_weight * alpha +
+                word_embeddings_weight.detach() * (1 - alpha)
+        )
     # Matrix multiply.
     if bias is None:
         logits_parallel = F.linear(input_parallel, word_embeddings_weight)
@@ -99,6 +110,23 @@ class Pooler(MegatronModule):
         pooled = self.dense(pooled)
         pooled = torch.tanh(pooled)
         return pooled
+
+
+def get_shrink_embedding_gradient_alpha(iteration):
+    args = get_args()
+
+    alpha = args.shrink_embedding_gradient_alpha
+    if args.shrink_embedding_gradient_steps is None:
+        return alpha
+    else:
+        x1 = int(args.shrink_embedding_gradient_steps[0])
+        x2 = int(args.shrink_embedding_gradient_steps[1])
+        if iteration <= x1:
+            return alpha
+        elif iteration >= x1 + x2:
+            return 1.0
+        else:
+            return alpha + (1 - alpha) * (args.iteration - x1) / x2
 
 
 class Embedding(MegatronModule):
@@ -176,9 +204,6 @@ class Embedding(MegatronModule):
         # Embeddings dropout
         self.embedding_dropout = torch.nn.Dropout(embedding_dropout_prob)
 
-        # Shrink embedding gradient
-        self.shrink_embedding_gradient_alpha = args.shrink_embedding_gradient_alpha
-
     def add_tokentype_embeddings(self, num_tokentypes):
         """Add token-type embedding. This function is provided so we can add
         token-type embeddings in case the pretrained model does not have it.
@@ -196,13 +221,21 @@ class Embedding(MegatronModule):
         args = get_args()
         self.init_method(self.tokentype_embeddings.weight)
 
+    def get_shrink_embedding_gradient_alpha(self):
+        args = get_args()
+        if hasattr(args, 'iteration'):
+            return get_shrink_embedding_gradient_alpha(args.iteration + 1)
+        else:
+            return args.shrink_embedding_gradient_alpha
+
     def forward(self, input_ids, position_ids, tokentype_ids=None):
         # Embeddings.
         words_embeddings = self.word_embeddings(input_ids)
-        embeddings = words_embeddings if self.shrink_embedding_gradient_alpha == 1.0 \
+        alpha = self.get_shrink_embedding_gradient_alpha()
+        embeddings = words_embeddings if alpha == 1.0 \
             else (
-                words_embeddings * self.shrink_embedding_gradient_alpha +
-                words_embeddings.detach() * (1 - self.shrink_embedding_gradient_alpha)
+                words_embeddings * alpha +
+                words_embeddings.detach() * (1 - alpha)
             )
 
         if self.position_embedding_type == PositionEmbeddingType.absolute:

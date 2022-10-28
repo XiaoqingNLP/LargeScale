@@ -197,7 +197,7 @@ class FusedScaleMaskSoftmax(nn.Module):
         else:
             # input is 4D tensor (b, np, sq, sk)
             if mask is not None:
-                return ScaledMaskedSoftmax.apply(input, mask, scale)
+                return ScaledMaskedSoftmax.apply(input, mask.contiguous(), scale)
             else:
                 return ScaledSoftmax.apply(input, scale)
 

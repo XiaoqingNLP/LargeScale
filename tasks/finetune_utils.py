@@ -19,7 +19,7 @@ from functools import partial
 
 import torch
 
-from megatron import get_args
+from megatron import get_args, get_num_microbatches
 from megatron import print_rank_0
 from megatron import get_timers
 from megatron import mpu
@@ -123,7 +123,7 @@ def _build_train_valid_dataloaders(train_dataset, valid_dataset, build_data_load
     train_dataloader = build_data_loader_fn(train_dataset, args.micro_batch_size,
                                          args.num_workers, not args.keep_last)
     # Set the training iterations.
-    args.train_iters_per_epoch = len(train_dataloader)
+    args.train_iters_per_epoch = len(train_dataloader) // get_num_microbatches()
     args.train_iters = args.epochs * args.train_iters_per_epoch
     # Validation dataset. For this dataset, we do not need to set up
     # shuffling so we can just use a simple infinite loop.
@@ -171,6 +171,9 @@ def _train(model, optimizer, lr_scheduler, forward_step,
     # Memory reporting flag.
     report_memory_flag = True
 
+    if end_of_epoch_callback is not None:
+        end_of_epoch_callback(model, 0)
+
     # For each remaining epoch
     timers('interval-time').start()
     for epoch in range(start_epoch, args.epochs):
@@ -179,8 +182,10 @@ def _train(model, optimizer, lr_scheduler, forward_step,
         # Set the data loader epoch to shuffle the index iterator.
         train_dataloader.sampler.set_epoch(args.seed + epoch)
 
+        train_data_iterator = iter(train_dataloader)
+
         # For all the batches in the dataset.
-        for iteration_, batch in enumerate(train_dataloader):
+        for iteration_ in range(args.train_iters_per_epoch):
 
             # Ignore the iterations before starting value
             if iteration_ < start_iteration:
@@ -189,8 +194,8 @@ def _train(model, optimizer, lr_scheduler, forward_step,
             start_iteration = 0
 
             # Train for one step.
-            out = train_step(forward_step, batch, model, optimizer, lr_scheduler)
-            losses_dict, skipped_iter, grad_norm, num_zeros_in_grad = out
+            out = train_step(forward_step, train_data_iterator, model, optimizer, lr_scheduler)
+            losses_dict, skipped_iter, grad_norm, num_zeros_in_grad, grad_norm_by_layer = out
             iteration += 1
 
             # Logging.
@@ -228,7 +233,7 @@ def _train(model, optimizer, lr_scheduler, forward_step,
 
         # Callback at the end of each epoch.
         if end_of_epoch_callback is not None:
-            end_of_epoch_callback(model, epoch)
+            end_of_epoch_callback(model, epoch + 1)
 
 
 def finetune(train_valid_datasets_provider, model_provider,
@@ -270,7 +275,7 @@ def finetune(train_valid_datasets_provider, model_provider,
     if args.iteration == 0 and args.pretrained_checkpoint is not None:
         original_load = args.load
         args.load = args.pretrained_checkpoint
-        _ = load_checkpoint(model, None, None)
+        _ = load_checkpoint(model, None, None, strict=args.prefix_prompt_length is None)
         args.load = original_load
         # This is critical when only model is loaded. We should make sure
         # main parameters are also updated.

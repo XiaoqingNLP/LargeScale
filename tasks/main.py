@@ -72,6 +72,8 @@ def get_tasks_args(parser):
 
     group.add_argument("--length-penalty", type=float, default=0.0)
 
+    group.add_argument('--freeze-prefix-layer-num', type=int, default=None)
+
     return parser
 
 
@@ -90,6 +92,8 @@ if __name__ == '__main__':
     superglue_tasks = list(PROCESSORS.keys())
     if args.task.lower() in superglue_tasks:
         from superglue.finetune import main
+    elif args.task.lower() == 'zero-shot':
+        from zeroshot_glm.evaluate import main
     elif args.task == 'RACE':
         from race.finetune import main
     elif args.task in ['MNLI', 'QQP']:

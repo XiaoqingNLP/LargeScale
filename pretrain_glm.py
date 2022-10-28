@@ -54,7 +54,7 @@ def model_provider(pre_process=True, post_process=True):
                              config_dict_or_path=args.deepspeed_config,
                              enabled=args.zero_stage == 3,
                              mpu=mpu):
-        if args.deepspeed:
+        if args.deepspeed and args.pipeline_model_parallel_size > 1:
             # GLM has dynamic attn_mask, so don't set args.attn_mask
 
             model = GPTModelPipe(
@@ -79,6 +79,8 @@ def process_data(data):
     args = get_args()
     # Items and their type.
     keys = ['text', 'loss_mask', 'target', 'attention_mask', 'position_id']
+    if not args.finetune and args.deepspeed:
+        keys.append('task_type')
     datatype = torch.int64
 
     data_b = mpu.broadcast_data(keys, data, datatype)
@@ -89,12 +91,15 @@ def process_data(data):
     attention_mask = data_b['attention_mask'].long()
     loss_mask = data_b['loss_mask'].float()
     position_ids = data_b['position_id'].long()
+    task_type = data_b['task_type'].long() if 'task_type' in data_b else None
 
     attention_mask = build_mask_matrix(attention_mask, tokens.size(0),
                                        tokens.size(1))
     attention_mask = attention_mask.to(torch.bool)
 
-    return tokens, labels, loss_mask, attention_mask, position_ids
+    if task_type is None:
+        return tokens, labels, loss_mask, attention_mask, position_ids
+    return tokens, labels, loss_mask, attention_mask, position_ids, task_type
 
 
 def get_batch(data_iterator):
@@ -111,7 +116,7 @@ def get_batch(data_iterator):
 def get_batch_pipe(data):
     """Modification of `get_batch` to work on `next(data_iterator)` instead of `data_iterator`"""
     args = get_args()
-    tokens, labels, loss_mask, attention_mask, position_ids = process_data(data)
+    tokens, labels, loss_mask, attention_mask, position_ids, task_type = process_data(data)
 
     if args.curriculum_learning and args.curriculum_seqlen < tokens.size()[1]:
         # seqlen-based curriculum learning
@@ -121,7 +126,7 @@ def get_batch_pipe(data):
         labels = labels[:, :args.curriculum_seqlen].contiguous()
         loss_mask = loss_mask[:, :args.curriculum_seqlen].contiguous()
 
-    return (tokens, position_ids, attention_mask), (labels, loss_mask)
+    return (tokens, position_ids, attention_mask), (labels, loss_mask, task_type)
 
 
 def loss_func(loss_mask, output_tensor):
@@ -142,7 +147,7 @@ def forward_step(data_iterator, model):
 
     # Get the batch.
     timers('batch-generator').start()
-    tokens, labels, loss_mask, attention_mask, position_ids = get_batch(
+    tokens, labels, loss_mask, attention_mask, position_ids, task_type = get_batch(
         data_iterator)
     timers('batch-generator').stop()
 
@@ -162,7 +167,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
     print_rank_0('> building train, validation, and test datasets for GPT ...')
     # Option 1 of data loading using --data-path
 
-    if args.data_path:
+    if args.data_path or args.multitask_data_path:
         train_ds, valid_ds, test_ds = build_train_valid_test_datasets(
             data_prefix=args.data_path,
             splits_string=args.split,

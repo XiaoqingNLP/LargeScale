@@ -96,27 +96,27 @@ def model_provider(pre_process=True, post_process=True, model_type='multiple_cho
         pass
     else:
         raise NotImplementedError
+    if args.prefix_prompt_length is not None:
+        model.requires_grad_(False)
+        for layer in model.model.language_model.encoder.layers:
+            if hasattr(layer.self_attention, "prefix_prompts"):
+                layer.self_attention.prefix_prompts.requires_grad_(True)
+    if args.freeze_prefix_layer_num:
+        for idx, layer in enumerate(model.model.language_model.encoder.layers):
+            if idx < args.freeze_prefix_layer_num:
+                layer.requires_grad_(False)
     return model
 
 
 def process_batch(batch, args):
     """Process batch and produce inputs for the model."""
-    keys = ["text", "label"]
-    if args.pretrained_bert:
-        keys += ["padding_mask", "types"]
-    else:
-        keys += ["mask", "position"]
-        if args.cloze_eval:
-            if args.fast_decode:
-                keys += ["dec_text", "dec_position", "dec_mask", "dec_target", "dec_logit_mask"]
-            else:
-                keys += ["target", "logit_mask"]
-                if args.segment_length > 0:
-                    keys += ["segment_id"]
-                if args.continuous_prompt:
-                    keys += ["prompt_pos"]
+    keys = ["text", "label", "attention_mask", "position"]
+    if args.cloze_eval:
+        keys += ["target", "loss_mask"]
+        if args.continuous_prompt:
+            keys += ["prompt_pos"]
     if args.variable_num_choices:
-        keys.append("loss_mask")
+        keys.append("choice_mask")
     # Broadcast data.
     datatype = torch.int64
     data_b = mpu.broadcast_data(keys, batch, datatype)
@@ -135,7 +135,6 @@ def finetune_forward_step(batch, model):
     args = get_args()
     timers = get_timers()
 
-
     # Get the batch.
     timers('batch generator').start()
     try:
@@ -147,72 +146,57 @@ def finetune_forward_step(batch, model):
     timers('batch generator').stop()
 
     # Forward model.
-    if args.pretrained_bert:
-        tokens, types, labels, attention_mask = data['text'], data['types'], data['label'], data['padding_mask']
-        logits = model(tokens, token_type_ids=types, attention_mask=attention_mask, checkpoint_activations=True)
-    elif args.cloze_eval:
+    if args.cloze_eval:
         tokens, labels, position_ids = data['text'], data['label'], data['position']
-        attention_mask = data['mask']
+        attention_mask = data['attention_mask']
 
-        if not args.fast_decode:
-            target_ids, logit_mask = data['target'], data['logit_mask']
-            if args.continuous_prompt:
-                prompt_pos = data["prompt_pos"]
-                result = model(tokens, position_ids, attention_mask, target_ids, logit_mask, prompt_pos=prompt_pos)
-            else:
-                result = model(tokens, position_ids, attention_mask, target_ids, logit_mask)
-            if not args.multi_token:
-                logits, lm_logits = result
-            else:
-                logits = result
+        target_ids, logit_mask = data['target'], data['loss_mask']
+        if args.continuous_prompt:
+            prompt_pos = data["prompt_pos"]
+            result = model(tokens, position_ids, attention_mask, target_ids, logit_mask, prompt_pos=prompt_pos)
         else:
-            dec_input_ids, dec_position_ids, dec_attention_mask = data['dec_text'], data['dec_position'], data[
-                'dec_mask']
-            dec_target_ids, dec_logit_mask = data['dec_target'], data['dec_logit_mask']
-            logits = model(tokens, position_ids, attention_mask, dec_input_ids, dec_position_ids,
-                                  dec_attention_mask, dec_target_ids, dec_logit_mask)
+            result = model(tokens, position_ids, attention_mask, target_ids, logit_mask)
+        if not args.multi_token:
+            logits, lm_logits = result
+        else:
+            logits = result
     else:
         tokens, labels, position_ids, attention_mask = data['text'], data['label'], data['position'], data['mask']
         logits = model(tokens, position_ids, attention_mask)
 
-    if args.adapet:
+    if "choice_mask" in data:
+        loss_mask = data["choice_mask"]
+        logits = logits * loss_mask - 10000.0 * (1.0 - loss_mask)
+    if args.loss_func == "cross_entropy":
+        # assert mpu.get_tensor_model_parallel_world_size() == 1
+        return logits.contiguous().float(), partial(cross_entropy_loss_func, labels)
+    elif args.loss_func == "hinge":
         raise NotImplementedError
-        batch_size, num_classes = logits.size()[:2]
-        label_mask = torch.ones(batch_size, num_classes, device=logits.device)
-        label_mask.scatter_(1, labels.unsqueeze(1), -1.0)
-        if "loss_mask" in data:
-            loss_mask = data["loss_mask"]
-            label_mask = label_mask * loss_mask
-        loss = logits.contiguous().float() * label_mask
-        loss = loss.sum() / batch_size
-    else:
-        if "segment_id" in data:
-            raise NotImplementedError
-            from torch_scatter import scatter_sum
-            if "loss_mask" in data:
-                logits = logits * data["loss_mask"]
-            logits = scatter_sum(logits, data["segment_id"], dim=1)
-        elif "loss_mask" in data:
-            loss_mask = data["loss_mask"]
-            logits = logits * loss_mask - 10000.0 * (1.0 - loss_mask)
-        if args.loss_func == "cross_entropy":
-            assert mpu.get_tensor_model_parallel_world_size() == 1
-            return logits.contiguous().float(), partial(cross_entropy_loss_func, labels)
-        elif args.loss_func == "hinge":
-            raise NotImplementedError
-            correct_logits = logits[range(logits.size(0)), labels]
-            hinge_loss = 1 + logits - correct_logits.unsqueeze(1)
-            hinge_loss[hinge_loss < 0.0] = 0.0
-            loss = hinge_loss.sum(dim=1).mean() - 1.0
-        elif args.loss_func == "generative" or args.loss_func == "mix":
-            raise NotImplementedError
-            batch_size = logits.size(0)
-            loss = - logits[range(batch_size), labels].mean()
-            if args.loss_func == "mix":
+        correct_logits = logits[range(logits.size(0)), labels]
+        hinge_loss = 1 + logits - correct_logits.unsqueeze(1)
+        hinge_loss[hinge_loss < 0.0] = 0.0
+        loss = hinge_loss.sum(dim=1).mean() - 1.0
+    elif args.loss_func == "generative" or args.loss_func == "mix":
+        batch_size = logits.size(0)
+        loss = -logits[range(batch_size), labels].mean()
+        if args.loss_func == "mix":
+            def mixed_cross_entropy_loss_func(loss, labels, output_tensor):
+                logits = output_tensor
+
+                # Cross-entropy loss.
                 loss_func = torch.nn.CrossEntropyLoss()
-                loss = loss + loss_func(logits.contiguous().float(), labels)
+                loss += loss_func(logits.contiguous().float(), labels)
+
+                # Reduce loss for logging.
+                averaged_loss = average_losses_across_data_parallel_group([loss])
+
+                return loss, {'lm loss': averaged_loss[0]}
+
+            return logits.contiguous().float(), partial(mixed_cross_entropy_loss_func, loss, labels)
         else:
             raise NotImplementedError
+    else:
+        raise NotImplementedError
 
     # Reduce loss for logging.
 
@@ -348,7 +332,7 @@ def main():
     args = get_args()
 
     assert args.glm, "Only support GLM for SuperGLUE"
-    assert args.tokenizer_type == "IceTokenizer", "Only support IceTokenzier for SuperGLUE"
+    assert args.tokenizer_type == "IceTokenizer", "Only support IceTokenizer for SuperGLUE"
     assert args.position_embedding_type != PositionEmbeddingType.alibi, "Don't support alibi for finetune"
 
     # For compability
@@ -357,7 +341,6 @@ def main():
     args.pretrained_bert = False
     args.segment_length = 0
     args.continuous_prompt = False
-    args.fast_decode = False
     args.num_prompt_tokens = 0
     args.task_mask = False
     args.prefix_prompt = False

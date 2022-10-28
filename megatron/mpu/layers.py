@@ -206,8 +206,8 @@ class VocabParallelEmbedding(torch.nn.Module):
 
         # only the first stage embedding runs this class' forward. The head's embedding does its own
         # thing, so don't waste memory allocating LN weights.
-        if mpu.is_pipeline_first_stage() and (args.use_bnb_optimizer or args.embed_layernorm):
-            self.norm = LayerNorm(embedding_dim)
+        # if mpu.is_pipeline_first_stage() and (args.use_bnb_optimizer or args.embed_layernorm):
+        #     self.norm = LayerNorm(embedding_dim)
 
         if args.use_bnb_optimizer:
             # for BNB we ignore the passed init_method and use torch.nn.init.xavier_uniform_
@@ -269,6 +269,23 @@ class VocabParallelEmbedding(torch.nn.Module):
         return output
 
 
+def should_quantize(layer_number, iteration) -> bool:
+    args = get_args()
+    num_layers = args.num_layers
+
+    if args.int8_quantization_warmup_steps is None:
+        return True
+    else:
+        x1 = int(args.int8_quantization_warmup_steps[0])
+        x2 = int(args.int8_quantization_warmup_steps[1])
+        if iteration <= x1:
+            return False
+        elif iteration >= x1 + x2:
+            return True
+        else:
+            return num_layers * (iteration - x1) / x2 >= (num_layers - layer_number)
+
+
 class ColumnParallelLinear(torch.nn.Module):
     """Linear layer with column parallelism.
 
@@ -296,7 +313,7 @@ class ColumnParallelLinear(torch.nn.Module):
     def __init__(self, input_size, output_size, bias=True, gather_output=True,
                  init_method=init.xavier_normal_, stride=1,
                  keep_master_weight_for_test=False,
-                 skip_bias_add=False):
+                 skip_bias_add=False, layer_number=None):
         super(ColumnParallelLinear, self).__init__()
 
         # Keep input parameters
@@ -344,6 +361,22 @@ class ColumnParallelLinear(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
+        self.layer_number = layer_number
+        self.apply_int8_quantization = args.apply_int8_quantization
+        self.activation_in_fp16 = args.activation_in_fp16
+        self.weight_quantization_bit_width = args.weight_quantization_bit_width
+        if self.apply_int8_quantization:
+            from bminf.kernels import gemm_calc_scale, gemm_round
+
+            with torch.no_grad():
+                self.weight_scale = gemm_calc_scale(self.weight)
+                self.weight_scale = self.weight_scale * 127 / ((2 ** (self.weight_quantization_bit_width - 1)) - 1)
+                self.weight_quant = gemm_round(self.weight, self.weight_scale)
+            self.weight_scale.requires_grad = False
+            self.weight_quant.requires_grad = False
+            self.weight_quant_iteration = -1
+            if not self.activation_in_fp16:
+                self.activation_lambda = Parameter(torch.tensor(1.0, dtype=args.params_dtype))
 
 
     def forward(self, input_):
@@ -352,7 +385,30 @@ class ColumnParallelLinear(torch.nn.Module):
         # Matrix multiply.
 
         bias = self.bias if not self.skip_bias_add else None
-        output_parallel = F.linear(input_parallel, self.weight, bias)
+        args = get_args()
+        if self.apply_int8_quantization and should_quantize(self.layer_number, args.iteration):
+            from bminf.kernels import gemm_calc_scale, gemm_round
+            from .quantization import W8A8CLinearFunction, W8A16LinearFunction
+
+            if args.iteration != self.weight_quant_iteration:
+                with torch.no_grad():
+                    self.weight_scale = gemm_calc_scale(self.weight)
+                    self.weight_scale = self.weight_scale * 127 / ((2 ** (self.weight_quantization_bit_width - 1)) - 1)
+                    self.weight_quant = gemm_round(self.weight, self.weight_scale)
+                self.weight_scale.requires_grad = False
+                self.weight_quant.requires_grad = False
+                self.weight_quant_iteration = args.iteration
+
+            if self.activation_in_fp16:
+                output_parallel = W8A16LinearFunction.apply(input_parallel, self.weight, self.weight_quant,
+                                                           self.weight_scale)
+            else:
+                output_parallel = W8A8CLinearFunction.apply(input_parallel, self.activation_lambda, self.weight,
+                                                            self.weight_quant, self.weight_scale)
+            if not self.skip_bias_add:
+                output_parallel = output_parallel + self.bias
+        else:
+            output_parallel = F.linear(input_parallel, self.weight, bias)
         if self.gather_output:
             # All-gather across the partitions.
             output = gather_from_tensor_model_parallel_region(output_parallel)
@@ -360,6 +416,11 @@ class ColumnParallelLinear(torch.nn.Module):
             output = output_parallel
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        super(ColumnParallelLinear, self)._load_from_state_dict(state_dict, prefix, local_metadata,
+            (not self.apply_int8_quantization) or self.activation_in_fp16, missing_keys, unexpected_keys, error_msgs)
 
 
 class RowParallelLinear(torch.nn.Module):
@@ -396,7 +457,7 @@ class RowParallelLinear(torch.nn.Module):
                  input_is_parallel=False,
                  init_method=init.xavier_normal_, stride=1,
                  keep_master_weight_for_test=False,
-                 skip_bias_add=False):
+                 skip_bias_add=False, layer_number=None):
         super(RowParallelLinear, self).__init__()
 
         # Keep input parameters
@@ -441,7 +502,22 @@ class RowParallelLinear(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
+        self.layer_number = layer_number
+        self.apply_int8_quantization = args.apply_int8_quantization
+        self.activation_in_fp16 = args.activation_in_fp16
+        self.weight_quantization_bit_width = args.weight_quantization_bit_width
+        if self.apply_int8_quantization:
+            from bminf.kernels import gemm_calc_scale, gemm_round
 
+            with torch.no_grad():
+                self.weight_scale = gemm_calc_scale(self.weight)
+                self.weight_scale = self.weight_scale * 127 / ((2 ** (self.weight_quantization_bit_width - 1)) - 1)
+                self.weight_quant = gemm_round(self.weight, self.weight_scale)
+            self.weight_scale.requires_grad = False
+            self.weight_quant.requires_grad = False
+            self.weight_quant_iteration = -1
+            if not self.activation_in_fp16:
+                self.activation_lambda = Parameter(torch.tensor(1.0, dtype=args.params_dtype))
 
     def forward(self, input_):
         # Set up backprop all-reduce.
@@ -450,7 +526,30 @@ class RowParallelLinear(torch.nn.Module):
         else:
             input_parallel = scatter_to_tensor_model_parallel_region(input_)
         # Matrix multiply.
-        output_parallel = F.linear(input_parallel, self.weight)
+        args = get_args()
+        if self.apply_int8_quantization and should_quantize(self.layer_number, args.iteration):
+            from bminf.kernels import gemm_calc_scale, gemm_round
+            from .quantization import W8A8CLinearFunction, W8A16LinearFunction
+
+            if args.iteration != self.weight_quant_iteration:
+                with torch.no_grad():
+                    self.weight_scale = gemm_calc_scale(self.weight)
+                    self.weight_scale = self.weight_scale * 127 / ((2 ** (self.weight_quantization_bit_width - 1)) - 1)
+                    self.weight_quant = gemm_round(self.weight, self.weight_scale)
+                self.weight_scale.requires_grad = False
+                self.weight_quant.requires_grad = False
+                self.weight_quant_iteration = args.iteration
+
+            if self.activation_in_fp16:
+                output_parallel = W8A16LinearFunction.apply(input_parallel, self.weight, self.weight_quant,
+                                                           self.weight_scale)
+            else:
+                output_parallel = W8A8CLinearFunction.apply(input_parallel, self.activation_lambda, self.weight,
+                                                            self.weight_quant, self.weight_scale)
+            if not self.skip_bias_add:
+                output_parallel = output_parallel + self.bias
+        else:
+            output_parallel = F.linear(input_parallel, self.weight)
         # All-reduce across all the partitions.
         output_ = reduce_from_tensor_model_parallel_region(output_parallel)
         if not self.skip_bias_add:
@@ -460,3 +559,9 @@ class RowParallelLinear(torch.nn.Module):
             output = output_
             output_bias = self.bias
         return output, output_bias
+
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        super(RowParallelLinear, self)._load_from_state_dict(state_dict, prefix, local_metadata,
+            (not self.apply_int8_quantization) or self.activation_in_fp16, missing_keys, unexpected_keys, error_msgs)

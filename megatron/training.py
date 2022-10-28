@@ -45,11 +45,13 @@ from megatron.optimizer import get_megatron_optimizer
 from megatron.initialize import initialize_megatron
 from megatron.initialize import write_args_to_tensorboard, log_restart_to_tensorboard
 from megatron.learning_rates import AnnealingLR
+from megatron.model.language_model import get_shrink_embedding_gradient_alpha
 from megatron.model.distributed import DistributedDataParallel as LocalDDP
 from megatron.utils import check_adlr_autoresume_termination, get_parameters_in_billions
 from megatron.utils import unwrap_model, found_kill_switch
 from megatron.data.data_samplers import build_pretraining_data_loader
 from megatron.utils import calc_params_l2_norm, store_initial_model, calc_model_update
+from megatron.utils import get_grad_norm_by_layer, calc_params_inf_norm_by_layer
 from megatron.schedules import forward_backward_no_pipelining
 from megatron.schedules import forward_backward_pipelining_without_interleaving
 from megatron.schedules import forward_backward_pipelining_with_interleaving
@@ -161,20 +163,20 @@ def pretrain(train_valid_test_dataset_provider,
         train_data_iterator, valid_data_iterator, test_data_iterator = build_train_valid_test_data_iterators(
                 train_valid_test_dataset_provider)
 
-    if args.data_path is not None and len(args.data_path) > 1:
-        prefixes, weights = analyze_data_prefix(args.data_path)
-        setattr(args, "data_prefixes", prefixes)
-        setattr(args, "data_weights", weights)
-    elif args.train_weighted_split_paths is not None and len(args.train_weighted_split_paths[0]) > 1:
-        paths = args.train_weighted_split_paths[0]
-        weights = args.train_weighted_split_weights[0]
-        data_prefix = [j for i in [[w,p] for w,p in zip(weights, paths)] for j in i]
-        prefixes, weights = analyze_data_prefix(data_prefix)
-        setattr(args, "data_prefixes", prefixes)
-        setattr(args, "data_weights", weights)
-    else:
-        setattr(args, "data_prefixes", None)
-        setattr(args, "data_weights", None)
+    # if args.data_path is not None and len(args.data_path) > 1:
+    #     prefixes, weights = analyze_data_prefix(args.data_path)
+    #     setattr(args, "data_prefixes", prefixes)
+    #     setattr(args, "data_weights", weights)
+    # elif args.train_weighted_split_paths is not None and len(args.train_weighted_split_paths[0]) > 1:
+    #     paths = args.train_weighted_split_paths[0]
+    #     weights = args.train_weighted_split_weights[0]
+    #     data_prefix = [j for i in [[w,p] for w,p in zip(weights, paths)] for j in i]
+    #     prefixes, weights = analyze_data_prefix(data_prefix)
+    #     setattr(args, "data_prefixes", prefixes)
+    #     setattr(args, "data_weights", weights)
+    # else:
+    #     setattr(args, "data_prefixes", None)
+    #     setattr(args, "data_weights", None)
 
     timers('train/valid/test-data-iterators-setup').stop()
     print_datetime('after dataloaders are built')
@@ -352,8 +354,7 @@ def get_learning_rate_scheduler(optimizer):
         else:
             warmup_steps = args.lr_warmup_samples
     else:
-        raise Exception(
-            'either train-iters or train-samples should be provided.')
+        return None
 
     lr_scheduler = AnnealingLR(
         optimizer,
@@ -441,13 +442,16 @@ def train_step(forward_step_func, data_iterator,
     args = get_args()
     timers = get_timers()
 
-    if args.deepspeed:
+    if args.deepspeed and isinstance(model[0], deepspeed.PipelineEngine):
         assert isinstance(model[0], deepspeed.PipelineEngine), model
         loss = model[0].train_batch(data_iter=data_iterator)
         skipped_iter = 0
         grad_norm = model[0].get_global_grad_norm()
         num_zeros_in_grad = 0
-        return {'lm loss' : loss}, skipped_iter, grad_norm, num_zeros_in_grad
+        if len(loss.shape) > 0 and loss.size(0) > 1:
+            return {'lm loss' : loss[0], 'bert loss': loss[1], 'gpt loss': loss[2], 'multitask loss': loss[3], 'sentence loss': loss[4]}, skipped_iter, grad_norm, num_zeros_in_grad, None
+        else:
+            return {'lm loss' : loss}, skipped_iter, grad_norm, num_zeros_in_grad, None
 
     # Set grad to zero.
     if not args.deepspeed:
@@ -506,12 +510,16 @@ def train_step(forward_step_func, data_iterator,
     # Update parameters.
     timers('optimizer').start()
     if args.deepspeed:
+        grad_norm_by_layer = None
         increment = get_num_microbatches() * \
                     args.micro_batch_size * \
                     args.data_parallel_size
         model[0].step(lr_kwargs={'increment': increment})
         update_successful = model[0].was_step_applied()
     else:
+        grad_norm_by_layer = None
+        if args.log_gradient_norm_by_layer:
+            grad_norm_by_layer = get_grad_norm_by_layer(model[0], optimizer.grad_scaler.inv_scale)
         update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
     timers('optimizer').stop()
 
@@ -536,14 +544,14 @@ def train_step(forward_step_func, data_iterator,
             for key in losses_reduced[0]:
                 losses_reduced_for_key = [x[key] for x in losses_reduced]
                 loss_reduced[key] = sum(losses_reduced_for_key) / len(losses_reduced_for_key)
-            return loss_reduced, skipped_iter, grad_norm, num_zeros_in_grad
-    return {}, skipped_iter, grad_norm, num_zeros_in_grad
+            return loss_reduced, skipped_iter, grad_norm, num_zeros_in_grad, grad_norm_by_layer
+    return {}, skipped_iter, grad_norm, num_zeros_in_grad, grad_norm_by_layer
 
 
 def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                  loss_scale, report_memory_flag, skipped_iter,
                  grad_norm, params_norm, num_zeros_in_grad,
-                 model_update=None, model=None):
+                 model_update=None, grad_norm_by_layer=None, params_inf_norm_by_layer=None, model=None):
     """Log training information such as losses, timing, ...."""
     args = get_args()
     timers = get_timers()
@@ -622,6 +630,8 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                               args.consumed_train_samples)
             writer.add_scalar('learning-rate/learning-rate vs tokens', learning_rate,
                               args.consumed_train_tokens)
+            writer.add_scalar('learning-rate/shrink-embedding-gradient-alpha',
+                              get_shrink_embedding_gradient_alpha(iteration), iteration)
         if args.log_batch_size_to_tensorboard:
             writer.add_scalar('batch-size/batch-size', batch_size, iteration)
             writer.add_scalar('batch-size/batch-size vs samples', batch_size,
@@ -665,6 +675,12 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                               args.consumed_train_samples)
             writer.add_scalar('model-update/model-update vs tokens', model_update,
                               args.consumed_train_tokens)
+        if grad_norm_by_layer is not None:
+            for name, norm in grad_norm_by_layer.items():
+                writer.add_scalar(f'grad-norm/grad-norm-{name}', norm, iteration)
+        if params_inf_norm_by_layer is not None:
+            for name, norm in params_inf_norm_by_layer.items():
+                writer.add_scalar(f'param-inf-norm/{name}', norm, iteration)
         if args.curriculum_learning:
             writer.add_scalar('curriculum_seqlen', args.curriculum_seqlen,
                               iteration)
@@ -881,7 +897,7 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
             args.pipeline_model_parallel_size >= 1:
             args.curriculum_seqlen = args.curriculum_scheduler.update_difficulty( \
                     args.iteration + 1)
-        loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = \
+        loss_dict, skipped_iter, grad_norm, num_zeros_in_grad, grad_norm_by_layer = \
             train_step(forward_step_func,
                        train_data_iterator,
                        model,
@@ -910,6 +926,9 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
         params_norm = None
         if args.log_params_norm:
             params_norm = calc_params_l2_norm(model)
+        params_inf_norm_by_layer = None
+        if args.log_params_inf_norm_by_layer:
+            params_inf_norm_by_layer = calc_params_inf_norm_by_layer(model[0])
         model_update = None
         if args.log_model_update:
             model_update = calc_model_update(model)
@@ -918,7 +937,7 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
                                           iteration, loss_scale,
                                           report_memory_flag, skipped_iter,
                                           grad_norm, params_norm, num_zeros_in_grad,
-                                          model_update, model)
+                                          model_update, grad_norm_by_layer, params_inf_norm_by_layer, model)
 
         # Autoresume
         if args.adlr_autoresume and \

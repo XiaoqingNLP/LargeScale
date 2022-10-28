@@ -53,6 +53,10 @@ class AnnealingLR(object):
             assert not self.use_checkpoint_lr_scheduler, 'both override and '\
                 'use-checkpoint are set.'
 
+        self.load_steps = 0
+        self.lr_auto_warmup_steps = args.lr_auto_warmup_steps
+        if self.lr_auto_warmup_steps:
+            print_rank_0(f"> lr-auto-warmup-steps: {self.lr_auto_warmup_steps}")
         # Set the learning rate
         self.step(0)
 
@@ -68,6 +72,21 @@ class AnnealingLR(object):
             if self.num_steps == self.warmup_steps and \
                 self.decay_tokens is not None:
                 self.warmup_tokens = self.num_tokens
+
+            args = get_args()
+            iteration = args.iteration if hasattr(args, 'iteration') else 0
+            if (
+                self.lr_auto_warmup_steps is not None
+                and self.lr_auto_warmup_steps[0] <= iteration <
+                self.lr_auto_warmup_steps[0] + self.lr_auto_warmup_steps[1]
+            ):
+                return max(
+                    1e-8,
+                    self.max_lr * float(self.num_steps) / float(self.warmup_steps) \
+                    * (iteration - self.lr_auto_warmup_steps[0])
+                    / self.lr_auto_warmup_steps[1],
+                )
+
             return self.max_lr * float(self.num_steps) / \
                 float(self.warmup_steps)
 
@@ -105,8 +124,22 @@ class AnnealingLR(object):
         else:
             raise Exception('{} decay style is not supported.'.format(
                 self.decay_style))
-       
-        return self.min_lr + coeff * delta_lr
+
+        args = get_args()
+        iteration = args.iteration if hasattr(args, 'iteration') else 0
+        if (
+            self.lr_auto_warmup_steps is not None
+            and self.lr_auto_warmup_steps[0] <= iteration <
+                self.lr_auto_warmup_steps[0] + self.lr_auto_warmup_steps[1]
+        ):
+            return max(
+                1e-8,
+                (self.min_lr + coeff * delta_lr)
+                * (iteration - self.lr_auto_warmup_steps[0])
+                / self.lr_auto_warmup_steps[1],
+            )
+        else:
+            return self.min_lr + coeff * delta_lr
 
 
     def step(self, increment, token_num=None):

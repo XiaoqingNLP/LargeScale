@@ -3,7 +3,10 @@
 import argparse
 import os
 import torch
+import sys
 from collections import OrderedDict
+
+sys.path.append(".")
 from deepspeed_checkpoint import ARGS_KEY, DeepSpeedCheckpoint
 
 MODEL_KEY = 'model'
@@ -25,6 +28,7 @@ def parse_arguments():
     parser.add_argument('--target_tp', default=1, type=int, help='Target TP degree')
     parser.add_argument('--target_pp', default=1, type=int, help='Target PP degree')
     parser.add_argument('--for_release', action='store_true', help='Convert for release purpose, reset some (progress) counters.')
+    parser.add_argument('--glu', action='store_true', help='Gated Linear Unit in the model')
     args = parser.parse_args()
     print(f'args = {args}')
     return args
@@ -78,7 +82,7 @@ def _renest_sd(sd):
     return new_sd
 
 
-def _create_rank_checkpoint(ds_checkpoint, checkpoint_path, tp_index, pp_index, for_release=False):
+def _create_rank_checkpoint(ds_checkpoint, tp_index, pp_index, for_release=False):
     meg_encoder_sd = OrderedDict()
     meg_embedding_sd = OrderedDict()
     meg_embedding_for_head_sd = OrderedDict()
@@ -137,14 +141,23 @@ def main():
     args = parse_arguments()
     print(f'Converting DeepSpeed checkpoint in {args.input_folder} to Megatron checkpoint in {args.output_folder}')
 
-    ds_checkpoint = DeepSpeedCheckpoint(args.input_folder, args.target_tp, args.target_pp)
+    ds_checkpoint = DeepSpeedCheckpoint(args.input_folder, args.target_tp, args.target_pp, args.glu)
     iteration = ds_checkpoint.get_iteration()
     _create_latest_file(args.output_folder, iteration)
     checkpoint_paths = _create_checkpoint_paths(args.output_folder, iteration, ds_checkpoint.tp_degree, ds_checkpoint.pp_degree)
-    for i in range(0, ds_checkpoint.tp_degree):
-        for j in range(0, ds_checkpoint.pp_degree):
-            sd = _create_rank_checkpoint(ds_checkpoint, i, j, args.for_release)
-            _save_checkpoint(checkpoint_paths[i][j], sd)
+    if os.environ.get("OMPI_COMM_WORLD_SIZE") is None:
+        for i in range(0, ds_checkpoint.tp_degree):
+            for j in range(0, ds_checkpoint.pp_degree):
+                sd = _create_rank_checkpoint(ds_checkpoint, i, j, args.for_release)
+                _save_checkpoint(checkpoint_paths[i][j], sd)
+    else:
+        assert int(os.environ.get("OMPI_COMM_WORLD_SIZE")) == ds_checkpoint.tp_degree * ds_checkpoint.pp_degree
+        rank = int(os.environ.get("OMPI_COMM_WORLD_RANK"))
+        tp_idx = rank // ds_checkpoint.pp_degree
+        pp_idx = rank % ds_checkpoint.pp_degree
+        print(f"[Rank {rank}] TP={tp_idx} PP={pp_idx}")
+        sd = _create_rank_checkpoint(ds_checkpoint, tp_idx, pp_idx, args.for_release)
+        _save_checkpoint(checkpoint_paths[tp_idx][pp_idx], sd)
 
 if __name__ == "__main__":
     main()

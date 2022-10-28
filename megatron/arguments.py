@@ -101,7 +101,7 @@ def parse_args(extra_args_provider=None, defaults={},
             "and Mode 2: --(train|valid|test)-weighted-split-paths"\
             "are mutually exclusive i.e. cannot be set together."
 
-    if args.data_path:
+    if args.data_path or args.multitask_data_path:
         assert args.train_weighted_split_paths is None, message
         setattr(args, "valid_weighted_split_names", None)
         setattr(args, "valid_weighted_split_weights", None)
@@ -325,6 +325,29 @@ def parse_args(extra_args_provider=None, defaults={},
     if args.apply_rotary_positional_embedding_kernel:
         assert not args.learnable_rotary_embedding, 'rope kernel only support unlearnable rope'
 
+    if args.lr_auto_warmup_steps and len(args.lr_auto_warmup_steps) > 0:
+        assert len(args.lr_auto_warmup_steps) == 2, 'len(lr-auto-warmup-steps) != 2'
+        args.lr_auto_warmup_steps[0] = int(args.lr_auto_warmup_steps[0])
+        args.lr_auto_warmup_steps[1] = int(args.lr_auto_warmup_steps[1])
+    else:
+        args.lr_auto_warmup_steps = None
+
+    if args.int8_quantization_warmup_steps and len(args.int8_quantization_warmup_steps) > 0:
+        assert args.apply_int8_quantization
+        assert len(args.int8_quantization_warmup_steps) == 2, 'len(int8-quantization-warmup-steps) != 2'
+        args.int8_quantization_warmup_steps[0] = int(args.int8_quantization_warmup_steps[0])
+        args.int8_quantization_warmup_steps[1] = int(args.int8_quantization_warmup_steps[1])
+    else:
+        args.int8_quantization_warmup_steps = None
+
+    if args.greedily_aggregate_multitask or args.aggregated_samples_per_sequence > 1:
+        assert args.finetune or args.micro_batch_size == 1
+
+    if args.load_deepspeed_model_only:
+        assert args.deepspeed
+
+    assert not (args.unified_multitask_encoding and args.adaptive_multitask_encoding)
+
     _print_args(args)
     return args
 
@@ -425,6 +448,14 @@ def _add_network_size_args(parser):
                        help='path to look for a kill switch, which if found will automatically exit the program'
                        )
 
+    group.add_argument('--prefix-prompt-length', type=int, default=None,
+                       help='Length of prefix prompt, None for not using')
+
+    group.add_argument('--prefix-prompt-num-layers', type=int, default=None,
+                       help='Number of prefix layers to insert prefix prompts, None for all the layers')
+
+    group.add_argument('--prefix-prompt-init-std', type=float, default=0.1,
+                       help='Standard deviation of the zero mean normal distribution used for prompt initialization')
 
     group.add_argument('--log-level', type=str, choices=list(log_levels.keys()),
                        help="Logger log level to use on the main process. Possible choices are the log levels as strings: 'debug', "
@@ -442,6 +473,10 @@ def _add_logging_args(parser):
 
     group.add_argument('--log-params-norm', action='store_true',
                        help='If set, calculate and log parameters norm.')
+    group.add_argument('--log-params-inf-norm-by-layer', action='store_true',
+                       help='If set, calculate and log parameters inf norm by layer.')
+    group.add_argument('--log-gradient-norm-by-layer', action='store_true',
+                       help='If set, calculate and log grad norm by layer.')
     group.add_argument('--log-model-update', action='store_true',
                        help='If set, calculate and log model update (will replicate initial model parameters).')
     group.add_argument('--log-num-zeros-in-grad', action='store_true',
@@ -496,6 +531,11 @@ def _add_regularization_args(parser):
                        help='Momentum factor for sgd')
     group.add_argument('--shrink-embedding-gradient-alpha', type=float, default=1.0,
                        help='Shrink embedding gradient for alpha')
+    group.add_argument('--shrink-logit-embedding-gradient', action='store_true')
+    group.add_argument('--shrink-embedding-gradient-steps', nargs='*', default=None,
+                       help='--shrink-embedding-gradient-steps <x1> <x2>'
+                            'Shrink embedding gradient alpha for x1 steps,'
+                            'then warm it up to 1.0 with x2 steps')
 
     return parser
 
@@ -598,6 +638,11 @@ def _add_training_args(parser):
     group.add_argument('--apply-rotary-positional-embedding-kernel', action='store_true',
                        help='Use custom cuda kernel for rotary positional embedding.')
     group.add_argument('--use-hinge-cross-entropy-loss', action='store_true')
+    group.add_argument('--apply-int8-quantization', action='store_true', default=None)
+    group.add_argument('--activation-in-fp16', action='store_true', default=None)
+    group.add_argument("--weight-quantization-bit-width", type=int, default=8)
+    group.add_argument('--int8-quantization-warmup-steps', nargs='*', default=None,
+                       help='--int8-quantization-warmup-steps <x1> <x2>')
 
     return parser
 
@@ -608,6 +653,8 @@ def _add_initialization_args(parser):
     group.add_argument('--seed', type=int, default=1234,
                        help='Random seed used for python, numpy, '
                        'pytorch, and cuda.')
+    group.add_argument('--data-shuffle-seed', type=int, default=None,
+                       help='Random seed used for shuffling GLM data')
     group.add_argument('--init-method-std', type=float, default=0.02,
                        help='Standard deviation of the zero mean normal '
                        'distribution used for weight initialization.')
@@ -651,6 +698,10 @@ def _add_learning_rate_args(parser):
     group.add_argument('--warmup', type=int, default=None,
                        help='Old lr warmup argument, do not use. Use one of the'
                        '--lr-warmup-* arguments above')
+    # group.add_argument('--warmup-samples-after-loading', type=int, default=None,
+    #                    help='Warmup samples after loading checkpoint.')
+    group.add_argument('--lr-auto-warmup-steps', nargs='*', default=None,
+                       help='--lr-auto-warmup-steps <x1> <x2>')
     group.add_argument('--min-lr', type=float, default=0.0,
                        help='Minumum value for learning rate. The scheduler'
                        'clip values below this threshold.')
@@ -686,6 +737,8 @@ def _add_checkpointing_args(parser):
                        help='Do not load optimizer when loading checkpoint.')
     group.add_argument('--no-load-rng', action='store_true', default=None,
                        help='Do not load rng state when loading checkpoint.')
+    group.add_argument('--load-deepspeed-model-only', action='store_true', default=None,
+                       help='Load deepspeed model only, do not load args and start from iteration 0.')
     group.add_argument('--finetune', action='store_true',
                        help='Load model for finetuning. Do not load optimizer '
                        'or rng state from checkpoint and set iteration to 0. '
@@ -908,6 +961,7 @@ def _add_data_args(parser):
                             'They are used for span masking in the T5 model')
     group.add_argument('--seq-length', type=int, default=None,
                        help='Maximum sequence length to process.')
+    group.add_argument('--tgt-seq-length', type=int, default=16)
     group.add_argument('--encoder-seq-length', type=int, default=None,
                        help='Maximum encoder sequence length to process.'
                        'This should be exclusive of --seq-length')
@@ -954,10 +1008,18 @@ def _add_data_args(parser):
                        'specific positions. This option tries to un-bias the loss by reweighting loss on specific '
                        'positions based on how frequently we train on that position.'
                        'This is mostly used for prefix_lm training')
-    group.add_argument("--multitask-data-path", type=str, default=None,
-                       help="Multitask data path")
+    group.add_argument("--multitask-data-path", nargs='*', default=None,
+                       help="Multitask data paths")
     group.add_argument("--multitask-ratio", type=float, default=0.05,
                        help="Ratio of multitask training data")
+    group.add_argument('--greedily-aggregate-multitask', action='store_true',
+                       help='Aggregate multitask samples greedily to max sequence length')
+    group.add_argument('--adaptive-multitask-encoding', action='store_true',
+                       help='Use adaptive multitask encoding for multitask data')
+    group.add_argument('--unified-multitask-encoding', action='store_true',
+                       help='Use unified multitask encoding for multitask data')
+    group.add_argument('--adaptive-multitask-encoding-length', type=float, default=5.0,
+                       help='Adaptive multitask encoding length')
 
     return parser
 
@@ -1105,6 +1167,7 @@ def _add_glm_args(parser):
     group = parser.add_argument_group("GLM", "GLM configurations")
     group.add_argument('--glm', action='store_true', help="whether use the BlockLM pre-training")
     group.add_argument("--gpt-prob", type=float, default=0.0)
+    group.add_argument("--sent-prob", type=float, default=0.0)
     # group.add_argument("--short-seq-prob", type=float, default=0.02)
     group.add_argument("--single-span-prob", type=float, default=0.02)
     # group.add_argument("--mask-ratio", type=float, default=0.15)
@@ -1129,4 +1192,10 @@ def _add_glm_args(parser):
     group.add_argument("--length-per-sample", type=int, default=None)
     group.add_argument("--aggregated-samples-per-sequence", type=int, default=1)
     group.add_argument('--aggregate-gpt-sample', action='store_true')
+    group.add_argument('--multitask-data-transform-steps', nargs='*', default=None,
+                       help='--multitask-data-transform-steps <x1> <x2>'
+                            'multitask ds1 -> ds2 in [x1, x2)')
+    group.add_argument('--rotary-embedding-2d', action='store_true',
+                       help='If set, use 2D rotary embedding for GLM.')
+    group.add_argument('--fast-decode', action='store_true')
     return parser
